@@ -37,5 +37,5 @@
 4. Verify limit switch behavior, if installed.
 5. Read ToF and ultrasonic samples without moving servos.
 6. Run `scripts/simulate_control_loop.py`.
-7. Replace `SimulatedServoDriver` with the hardware driver.
+7. Run `iot-edge --config config/settings.toml --run --hardware-servo --hardware-sensors`.
 8. Tune `Kp`, `Kd`, `deadband_deg`, `max_speed_deg_s`, and `max_accel_deg_s2`.

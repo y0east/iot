@@ -17,6 +17,23 @@ class EdgeRuntimeTests(unittest.TestCase):
         self.assertFalse(second.ack)
         self.assertEqual(runtime.current_query, "red cup")
 
+    def test_replayed_command_id_is_ignored_after_current_command_changes(self) -> None:
+        runtime = EdgeRuntime(AppConfig())
+        track = CommandPacket.create(CommandType.TRACK, query="red cup")
+        runtime.handle_command(track)
+        runtime.handle_command(CommandPacket.create(CommandType.CENTER))
+        runtime.center_step()
+        replay = runtime.handle_command(track)
+        self.assertFalse(replay.ack)
+        self.assertEqual(runtime.state, SystemState.IDLE)
+
+    def test_track_command_speed_limit_is_applied(self) -> None:
+        runtime = EdgeRuntime(AppConfig())
+        runtime.handle_command(
+            CommandPacket.create(CommandType.TRACK, query="red cup", max_speed_deg_s=5)
+        )
+        self.assertEqual(runtime.controller.max_speed_deg_s, 5)
+
     def test_scan_requires_consecutive_initial_detections(self) -> None:
         config = AppConfig(scan=ScanConfig(confirmation_frames=3))
         runtime = EdgeRuntime(config)
@@ -44,6 +61,59 @@ class EdgeRuntimeTests(unittest.TestCase):
         )
         runtime.handle_tracking_result(result, SensorSample.empty())
         self.assertEqual(runtime.state, SystemState.TRACKING)
+
+    def test_scan_rejects_far_or_tiny_initial_candidate(self) -> None:
+        config = AppConfig(scan=ScanConfig(confirmation_frames=1))
+        runtime = EdgeRuntime(config)
+        runtime.handle_command(CommandPacket.create(CommandType.TRACK, query="red cup"))
+        result = TrackingResult(
+            packet="tracking_result",
+            ts_req=now_us(),
+            ts_resp=now_us(),
+            bbox=BBox(620, 450, 630, 460),
+            confidence=0.99,
+            track_id=7,
+            query="red cup",
+        )
+        runtime.handle_tracking_result(result, SensorSample.empty())
+        self.assertEqual(runtime.state, SystemState.SCAN)
+
+    def test_stale_tracking_result_is_ignored(self) -> None:
+        runtime = EdgeRuntime(AppConfig())
+        runtime.state_machine.state = SystemState.TRACKING
+        fresh = TrackingResult(
+            packet="tracking_result",
+            ts_req=1000,
+            ts_resp=1000,
+            bbox=BBox(300, 220, 340, 260),
+            confidence=0.9,
+            track_id=7,
+            query="red cup",
+        )
+        stale = TrackingResult(
+            packet="tracking_result",
+            ts_req=900,
+            ts_resp=900,
+            bbox=BBox(100, 100, 150, 150),
+            confidence=0.9,
+            track_id=7,
+            query="red cup",
+        )
+        runtime.handle_tracking_result(fresh, SensorSample.empty())
+        applied_count = runtime.servo.applied_count
+        status = runtime.handle_tracking_result(stale, SensorSample.empty())
+        self.assertFalse(status.ack)
+        self.assertEqual(status.message, "stale tracking result ignored")
+        self.assertEqual(runtime.servo.applied_count, applied_count)
+
+    def test_redetect_command_sets_one_shot_request(self) -> None:
+        runtime = EdgeRuntime(AppConfig())
+        runtime.state_machine.state = SystemState.SAFE_HOLD
+        runtime.safe_hold_started_us = now_us()
+        status = runtime.handle_command(CommandPacket.create(CommandType.REDETECT))
+        self.assertTrue(status.ack)
+        self.assertTrue(runtime.consume_redetect_request())
+        self.assertFalse(runtime.consume_redetect_request())
 
     def test_safe_hold_times_out_to_centering(self) -> None:
         config = AppConfig(

@@ -9,6 +9,7 @@
 - ZMQ 영상/추론 패킷 송수신 런타임
 - 라즈베리파이 엣지 상태머신: `IDLE`, `SCAN`, `DELAY_COMPENSATION`, `TRACKING`, `SAFE_HOLD`, `LIMITED_RESCAN`, `CENTERING`, `ERROR`
 - `Kinit` 연속 검출 기반 능동탐색 확정, 탐색 실패 시 중립각 복귀
+- 명령 고유번호 재실행 방지, stale 추론 결과 폐기, thread-safe 런타임 상태 보호
 - 픽셀 오차 기반 팬/틸트 PD 제어, deadband, 최대 각속도, 최대 각가속도, PWM 펄스폭 매핑
 - ToF/초음파/리밋스위치 기반 단순 임계값 검증과 안전대기 전환
 - 안전대기 soft-stop, 동일 대상 재검출, 제한재탐색, timeout 중립각 복귀
@@ -69,6 +70,12 @@ iot-server --config config/settings.toml --serve --production
 
 ```bash
 iot-edge --config config/settings.toml --run
+```
+
+PCA9685 서보와 실제 거리센서를 사용할 때:
+
+```bash
+iot-edge --config config/settings.toml --run --hardware-servo --hardware-sensors
 ```
 
 하드웨어 없이 통신 루프만 확인할 때:

@@ -39,9 +39,20 @@ class ControllerState:
 class PDServoController:
     def __init__(self, config: AppConfig) -> None:
         self.config = config
+        self.max_speed_deg_s = config.control.max_speed_deg_s
         self.state = ControllerState(
             pan_deg=config.control.pan.center_deg,
             tilt_deg=config.control.tilt.center_deg,
+        )
+
+    def set_max_speed_limit(self, max_speed_deg_s: float | None) -> None:
+        if max_speed_deg_s is None:
+            self.max_speed_deg_s = self.config.control.max_speed_deg_s
+            return
+        self.max_speed_deg_s = clamp(
+            max_speed_deg_s,
+            1.0,
+            self.config.control.max_speed_deg_s,
         )
 
     def update(self, bbox: BBox, dt_s: float) -> ServoCommand:
@@ -99,7 +110,7 @@ class PDServoController:
 
     def center_step(self, dt_s: float) -> ServoCommand:
         self.soft_stop(dt_s)
-        max_delta = self.config.control.max_speed_deg_s * max(dt_s, 1e-3)
+        max_delta = self.max_speed_deg_s * max(dt_s, 1e-3)
         self.state.pan_deg = move_toward(
             self.state.pan_deg, self.config.control.pan.center_deg, max_delta
         )
@@ -135,8 +146,8 @@ class PDServoController:
         omega = kp * error + kd * derivative
         omega = clamp(
             omega,
-            -self.config.control.max_speed_deg_s,
-            self.config.control.max_speed_deg_s,
+            -self.max_speed_deg_s,
+            self.max_speed_deg_s,
         )
         return omega, derivative
 

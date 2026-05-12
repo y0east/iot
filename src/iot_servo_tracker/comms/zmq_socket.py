@@ -47,13 +47,21 @@ class ZmqEdgeTransport:
         self.result_socket = self.context.socket(zmq.PULL)
         self.result_socket.connect(result_endpoint)
 
-    def send_frame(self, ts_req: int, query: str, frame_bytes: bytes, frame_index: int) -> None:
+    def send_frame(
+        self,
+        ts_req: int,
+        query: str,
+        frame_bytes: bytes,
+        frame_index: int,
+        redetect: bool = False,
+    ) -> None:
         frame = MultipartFrame(
             header={
                 "packet": "frame",
                 "ts_req": ts_req,
                 "query": query,
                 "frame_index": frame_index,
+                "redetect": redetect,
             },
             payload=frame_bytes,
         )

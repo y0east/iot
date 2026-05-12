@@ -8,6 +8,7 @@ from iot_servo_tracker.server.runtime import VisionRuntime
 class RecordingPipeline:
     def __init__(self) -> None:
         self.frame_bytes = b""
+        self.redetect_count = 0
 
     def process_frame(
         self,
@@ -19,12 +20,24 @@ class RecordingPipeline:
         self.frame_bytes = frame_bytes
         return TrackingResult.empty(ts_req=ts_req, query=query)
 
+    def redetect(self, frame_bytes: bytes, query: str, ts_req: int) -> TrackingResult:
+        self.redetect_count += 1
+        self.frame_bytes = frame_bytes
+        return TrackingResult.empty(ts_req=ts_req, query=query)
+
 
 class VisionRuntimeTests(unittest.TestCase):
     def test_passes_frame_bytes_to_pipeline(self) -> None:
         pipeline = RecordingPipeline()
         runtime = VisionRuntime(AppConfig(), pipeline=pipeline)
         runtime.process(ts_req=1, query="red cup", frame_bytes=b"jpeg-bytes")
+        self.assertEqual(pipeline.frame_bytes, b"jpeg-bytes")
+
+    def test_redetect_flag_calls_pipeline_redetect(self) -> None:
+        pipeline = RecordingPipeline()
+        runtime = VisionRuntime(AppConfig(), pipeline=pipeline)
+        runtime.process(ts_req=1, query="red cup", frame_bytes=b"jpeg-bytes", redetect=True)
+        self.assertEqual(pipeline.redetect_count, 1)
         self.assertEqual(pipeline.frame_bytes, b"jpeg-bytes")
 
 

@@ -16,6 +16,7 @@ The project follows the plan from the design PDF:
    - Runs the state machine and PD servo controller.
    - Emits status packets for the web screen.
    - Performs active scan, K-frame initial lock, safe-hold, limited rescan, and center return.
+   - Ignores replayed command ids and stale inference packets before they can reach servo control.
 
 3. Server layer on RTX laptop
    - Performs initial open-vocabulary target selection with WeDetect.
@@ -91,6 +92,7 @@ The control loop converts image-space target error into servo commands:
 ## Safe Hold
 
 `SAFE_HOLD` is a powered soft-stop, not a full shutdown. New vision coordinates are not used as control input. The controller sets target angular velocity to zero and lets the acceleration limiter bring the mount to a stable stop. Sensor sampling and redetection may continue so the system can recover when the same target is confirmed again.
+Redetection requests are carried on the next ZMQ frame header so the server can reset the WeDetect/YOLO lock before returning a new candidate.
 
 ## Runtime Commands
 

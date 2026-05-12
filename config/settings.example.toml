@@ -67,3 +67,5 @@ speed_deg_s = 10.0
 confidence_threshold = 0.50
 confirmation_frames = 3
 passes = 2
+max_center_distance_ratio = 0.45
+min_box_area_ratio = 0.002

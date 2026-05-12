@@ -52,7 +52,12 @@ def main(argv: list[str] | None = None) -> None:
 
 def run_edge(args: argparse.Namespace) -> None:
     config = load_config(args.config)
-    runtime = EdgeRuntime(config=config)
+    servo = (
+        Pca9685ServoDriver(config.control.pan, config.control.tilt)
+        if args.hardware_servo
+        else SimulatedServoDriver()
+    )
+    runtime = EdgeRuntime(config=config, servo=servo)
     transport = ZmqEdgeTransport(
         config.zmq.frame_connect_endpoint,
         config.zmq.result_connect_endpoint,
@@ -71,11 +76,18 @@ def run_edge(args: argparse.Namespace) -> None:
         while True:
             ts_req = now_us()
             frame = camera.read_jpeg()
-            if runtime.current_query:
-                transport.send_frame(ts_req, runtime.current_query, frame, frame_index)
+            query, redetect = runtime.next_frame_request()
+            if query:
+                transport.send_frame(
+                    ts_req,
+                    query,
+                    frame,
+                    frame_index,
+                    redetect=redetect,
+                )
                 frame_index += 1
             result = transport.recv_result(timeout_ms=1)
-            sensor = sensors.read()
+            sensor = _read_sensor_sample(sensors)
             if result is not None:
                 last_status = runtime.handle_tracking_result(result, sensor)
             else:
@@ -88,6 +100,13 @@ def run_edge(args: argparse.Namespace) -> None:
         bridge.stop()
         transport.close()
         camera.close()
+
+
+def _read_sensor_sample(sensors) -> SensorSample:
+    try:
+        return sensors.read()
+    except Exception:
+        return SensorSample.empty()
 
 
 def simulate(argv: list[str] | None = None) -> None:

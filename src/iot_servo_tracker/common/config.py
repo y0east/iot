@@ -60,6 +60,8 @@ class ScanConfig:
     confidence_threshold: float = 0.50
     confirmation_frames: int = 3
     passes: int = 2
+    max_center_distance_ratio: float = 0.45
+    min_box_area_ratio: float = 0.002
 
 
 @dataclass(frozen=True)

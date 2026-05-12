@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
+from threading import RLock
 
 from iot_servo_tracker.common.config import AppConfig
 from iot_servo_tracker.common.packets import (
@@ -48,8 +50,13 @@ class EdgeRuntime:
     limited_rescan_center_deg: float = 0.0
     last_valid_result: TrackingResult | None = None
     last_loss_velocity_px_s: float = 0.0
+    last_result_ts_req: int = 0
+    redetect_requested: bool = False
+    processed_cmd_ids: set[str] = field(default_factory=set)
+    processed_cmd_id_order: deque[str] = field(default_factory=deque)
     last_status: StatusAck = field(default_factory=StatusAck)
     last_command: ServoCommand | None = None
+    _lock: RLock = field(default_factory=RLock, repr=False)
 
     def __post_init__(self) -> None:
         self.controller = PDServoController(self.config)
@@ -63,40 +70,71 @@ class EdgeRuntime:
         return self.state_machine.state
 
     def handle_command(self, command: CommandPacket) -> StatusAck:
+        with self._lock:
+            return self._handle_command_unlocked(command)
+
+    def _handle_command_unlocked(self, command: CommandPacket) -> StatusAck:
         command.validate()
-        if command.cmd_id == self.current_cmd_id:
-            return self._status("duplicate command ignored")
+        if command.cmd_id in self.processed_cmd_ids:
+            return self._status("duplicate command ignored", ack=False, cmd_id=command.cmd_id)
+        self._remember_command(command.cmd_id)
 
         if command.cmd_type == CommandType.TRACK:
             if self.state != SystemState.IDLE:
                 return self._status(
                     f"TRACK rejected while state is {self.state.value}",
                     ack=False,
+                    cmd_id=command.cmd_id,
                 )
             self.current_cmd_id = command.cmd_id
             self.current_query = command.query
+            self.controller.set_max_speed_limit(command.max_speed_deg_s)
             self._begin_scan(command.scan_range_deg)
             self.state_machine.apply(Event.TRACK_COMMAND)
         elif command.cmd_type == CommandType.STOP:
             self.current_cmd_id = command.cmd_id
+            self.current_query = ""
+            self.controller.set_max_speed_limit(None)
             self.state_machine.apply(Event.STOP_COMMAND)
         elif command.cmd_type == CommandType.CENTER:
             self.current_cmd_id = command.cmd_id
+            self.current_query = ""
+            self.controller.set_max_speed_limit(None)
             self.state_machine.apply(Event.CENTER_COMMAND)
         elif command.cmd_type == CommandType.REDETECT:
-            self.current_cmd_id = command.cmd_id
             if self.state == SystemState.SAFE_HOLD:
+                self.current_cmd_id = command.cmd_id
+                self.redetect_requested = True
                 self.state_machine.apply(Event.RESCAN_REQUIRED)
                 self._begin_limited_rescan()
-            elif self.state != SystemState.LIMITED_RESCAN:
+            elif self.state == SystemState.LIMITED_RESCAN:
+                self.current_cmd_id = command.cmd_id
+                self.redetect_requested = True
+            else:
                 return self._status(
                     f"REDETECT ignored while state is {self.state.value}",
                     ack=False,
+                    cmd_id=command.cmd_id,
                 )
         return self._status(f"accepted {command.cmd_type.value}")
 
     def capture_frame(self, frame_bytes: bytes, ts_us: int | None = None) -> None:
-        self.frame_buffer.append(ts_us or now_us(), frame_bytes)
+        with self._lock:
+            self.frame_buffer.append(ts_us or now_us(), frame_bytes)
+
+    def consume_redetect_request(self) -> bool:
+        with self._lock:
+            requested = self.redetect_requested
+            self.redetect_requested = False
+            return requested
+
+    def next_frame_request(self) -> tuple[str, bool]:
+        with self._lock:
+            if not self.current_query:
+                return "", False
+            requested = self.redetect_requested
+            self.redetect_requested = False
+            return self.current_query, requested
 
     def handle_tracking_result(
         self,
@@ -104,8 +142,25 @@ class EdgeRuntime:
         sensor_sample: SensorSample | None = None,
         dt_s: float = 0.033,
     ) -> StatusAck:
+        with self._lock:
+            return self._handle_tracking_result_unlocked(result, sensor_sample, dt_s)
+
+    def _handle_tracking_result_unlocked(
+        self,
+        result: TrackingResult,
+        sensor_sample: SensorSample | None = None,
+        dt_s: float = 0.033,
+    ) -> StatusAck:
         sensor_sample = sensor_sample or SensorSample.empty()
         rtt_ms = max((result.ts_resp - result.ts_req) / 1_000.0, 0.0)
+        if self.last_result_ts_req and result.ts_req <= self.last_result_ts_req:
+            return self._status(
+                "stale tracking result ignored",
+                rtt_ms=rtt_ms,
+                confidence=result.confidence,
+                ack=False,
+            )
+        self.last_result_ts_req = result.ts_req
         entered_safe_hold = False
         if self.delay_stats.is_delayed(rtt_ms) and self.state == SystemState.TRACKING:
             self._enter_safe_hold()
@@ -117,7 +172,7 @@ class EdgeRuntime:
                 self.last_valid_result = result
                 self.state_machine.apply(Event.DETECTION_LOCKED)
             else:
-                self.control_step(dt_s, sensor_sample)
+                self._control_step_unlocked(dt_s, sensor_sample)
         if self.state == SystemState.DELAY_COMPENSATION:
             self.state_machine.apply(Event.SYNC_READY)
 
@@ -174,9 +229,9 @@ class EdgeRuntime:
                 self.state_machine.apply(Event.RESCAN_SUCCESS)
                 self.state_machine.apply(Event.SYNC_READY)
             else:
-                self.control_step(dt_s, sensor_sample)
+                self._control_step_unlocked(dt_s, sensor_sample)
         elif self.state == SystemState.CENTERING:
-            self.center_step(dt_s)
+            self._center_step_unlocked(dt_s)
 
         return self._status(validation.reason, rtt_ms=rtt_ms, confidence=result.confidence)
 
@@ -185,9 +240,17 @@ class EdgeRuntime:
         dt_s: float = 0.033,
         sensor_sample: SensorSample | None = None,
     ) -> StatusAck:
+        with self._lock:
+            return self._control_step_unlocked(dt_s, sensor_sample)
+
+    def _control_step_unlocked(
+        self,
+        dt_s: float = 0.033,
+        sensor_sample: SensorSample | None = None,
+    ) -> StatusAck:
         sensor_sample = sensor_sample or SensorSample.empty()
         if sensor_sample.limit_switch_active:
-            self.safe_stop_step(dt_s)
+            self._safe_stop_step_unlocked(dt_s)
             self.state_machine.apply(Event.CALIBRATION_ERROR)
             return self._status("limit switch is active", ack=False)
         if self.state == SystemState.SCAN:
@@ -197,22 +260,40 @@ class EdgeRuntime:
         elif self.state == SystemState.LIMITED_RESCAN:
             self._limited_rescan_step(dt_s)
         elif self.state == SystemState.CENTERING:
-            self.center_step(dt_s)
+            self._center_step_unlocked(dt_s)
         return self._status("control step")
 
     def center_step(self, dt_s: float = 0.033) -> StatusAck:
+        with self._lock:
+            return self._center_step_unlocked(dt_s)
+
+    def _center_step_unlocked(self, dt_s: float = 0.033) -> StatusAck:
         command = self.controller.center_step(dt_s)
         self.servo.apply(command)
         self.last_command = command
         if self.controller.is_centered():
             self.state_machine.apply(Event.CENTERED)
+            self.current_query = ""
         return self._status("centering")
 
     def safe_stop_step(self, dt_s: float = 0.033) -> StatusAck:
+        with self._lock:
+            return self._safe_stop_step_unlocked(dt_s)
+
+    def _safe_stop_step_unlocked(self, dt_s: float = 0.033) -> StatusAck:
         command = self.controller.soft_stop(dt_s)
         self.servo.apply(command)
         self.last_command = command
         return self._status("soft stop")
+
+    def _remember_command(self, cmd_id: str) -> None:
+        if cmd_id in self.processed_cmd_ids:
+            return
+        while len(self.processed_cmd_id_order) >= 256:
+            expired = self.processed_cmd_id_order.popleft()
+            self.processed_cmd_ids.discard(expired)
+        self.processed_cmd_id_order.append(cmd_id)
+        self.processed_cmd_ids.add(cmd_id)
 
     def _begin_scan(self, scan_range_deg: float) -> None:
         limit = min(abs(scan_range_deg), self.config.scan.range_deg)
@@ -222,6 +303,7 @@ class EdgeRuntime:
         self.scan_passes_completed = 0
         self.scan_lock_key = ""
         self.scan_lock_count = 0
+        self.redetect_requested = True
 
     def _scan_step(self, dt_s: float) -> None:
         command = self.controller.scan_pan_step(
@@ -242,7 +324,7 @@ class EdgeRuntime:
             self.state_machine.apply(Event.SCAN_FAILED)
 
     def _scan_candidate_locked(self, result: TrackingResult) -> bool:
-        if result.bbox is None or result.confidence < self.config.scan.confidence_threshold:
+        if not self._is_initial_scan_candidate(result):
             self.scan_lock_key = ""
             self.scan_lock_count = 0
             return False
@@ -258,6 +340,7 @@ class EdgeRuntime:
         if self.safe_hold_started_us is None:
             self.safe_hold_started_us = now_us()
             self.last_loss_velocity_px_s = self._estimate_loss_velocity()
+            self.redetect_requested = True
 
     def _advance_safe_hold(self, dt_s: float) -> None:
         command = self.controller.soft_stop(dt_s)
@@ -271,6 +354,7 @@ class EdgeRuntime:
             return
         if elapsed_s >= self.config.safety.safe_hold_rescan_delay_s:
             self.state_machine.apply(Event.RESCAN_REQUIRED)
+            self.redetect_requested = True
             self._begin_limited_rescan()
 
     def _begin_limited_rescan(self) -> None:
@@ -315,6 +399,20 @@ class EdgeRuntime:
         distance = ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5
         return distance <= self.config.safety.pixel_jump_threshold * 2.0
 
+    def _is_initial_scan_candidate(self, result: TrackingResult) -> bool:
+        if result.bbox is None or result.confidence < self.config.scan.confidence_threshold:
+            return False
+        center_x, center_y = result.bbox.center
+        dx = (center_x - self.config.camera.width / 2.0) / self.config.camera.width
+        dy = (center_y - self.config.camera.height / 2.0) / self.config.camera.height
+        center_distance = (dx**2 + dy**2) ** 0.5
+        if center_distance > self.config.scan.max_center_distance_ratio:
+            return False
+        frame_area = self.config.camera.width * self.config.camera.height
+        if frame_area <= 0:
+            return False
+        return result.bbox.area / frame_area >= self.config.scan.min_box_area_ratio
+
     def _estimate_loss_velocity(self) -> float:
         if len(self.detections.results) < 2:
             return 0.0
@@ -332,10 +430,11 @@ class EdgeRuntime:
         rtt_ms: float = 0.0,
         confidence: float = 0.0,
         ack: bool = True,
+        cmd_id: str | None = None,
     ) -> StatusAck:
         command = self.last_command
         status = StatusAck(
-            cmd_id=self.current_cmd_id,
+            cmd_id=cmd_id or self.current_cmd_id,
             ack=ack,
             system_state=self.state.value,
             pan_deg=command.pan_deg if command else self.controller.state.pan_deg,

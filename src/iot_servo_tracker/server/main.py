@@ -51,6 +51,7 @@ def serve(config, runtime: VisionRuntime) -> None:
                 ts_req=int(header["ts_req"]),
                 query=str(header.get("query", "")),
                 frame_bytes=payload,
+                redetect=bool(header.get("redetect", False)),
             )
             transport.send_result(result)
     except KeyboardInterrupt:
