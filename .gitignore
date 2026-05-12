@@ -1,0 +1,23 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+dist/
+build/
+.DS_Store
+
+# Local secrets and runtime state
+.streamlit/secrets.toml
+config/settings.toml
+logs/
+data/
+
+# Generated during PDF inspection in this workspace
+preview/
+preview_sips/
+swift_cache/
+pycache_compile/
