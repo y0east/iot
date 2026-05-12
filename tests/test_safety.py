@@ -21,6 +21,21 @@ class SafetyTests(unittest.TestCase):
         self.assertFalse(stats.is_delayed(90))
         self.assertTrue(stats.is_delayed(120))
 
+    def test_delay_outlier_is_checked_before_stats_update(self) -> None:
+        stats = DelayStats(default_threshold_ms=250)
+        for _ in range(5):
+            self.assertFalse(stats.is_delayed(20))
+        self.assertTrue(stats.is_delayed(1000))
+
+    def test_ultrasonic_only_drop_counts_as_occlusion(self) -> None:
+        config = SafetyConfig(consecutive_frames=1, ultrasonic_jump_threshold_mm=100)
+        validator = SensorValidator(config)
+        validator.evaluate(BBox(0, 0, 10, 10), SensorSample(ts=1, ultrasonic_mm=200))
+        farther = validator.evaluate(BBox(0, 0, 10, 10), SensorSample(ts=2, ultrasonic_mm=400))
+        self.assertFalse(farther.safe_hold)
+        closer = validator.evaluate(BBox(0, 0, 10, 10), SensorSample(ts=3, ultrasonic_mm=100))
+        self.assertTrue(closer.safe_hold)
+
 
 if __name__ == "__main__":
     unittest.main()

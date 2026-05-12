@@ -1,16 +1,19 @@
 # IoT Servo Tracker
 
-서보모터 기반 팬-틸트 객체 추적 프로젝트입니다. PDF 명세의 핵심 요구사항을 기준으로 라즈베리파이 엣지 제어, RTX 서버 비전 추론, Streamlit 웹 명령 화면, MQTT/ZMQ 통신, 센서 검증, 안전대기 상태를 분리한 Python 프로젝트 골격을 구성했습니다.
+서보모터 기반 팬-틸트 객체 추적 프로젝트입니다. PDF 명세의 핵심 요구사항을 기준으로 라즈베리파이 엣지 제어, RTX 서버 비전 추론, Streamlit 웹 명령 화면, MQTT/ZMQ 통신, 센서 검증, 능동탐색, 안전대기 복구 흐름을 실행 가능한 Python 런타임으로 구성했습니다.
 
 ## 핵심 기능
 
 - Streamlit 웹 화면에서 자연어 추적 대상 입력, 추적 시작, 중지, 재검출, 중립각 복귀 명령 생성
 - MQTT 명령/상태 패킷 구조와 중복 명령 방지용 `cmd_id` 지원
-- ZMQ 영상/추론 패킷을 위한 JSON + binary multipart 헬퍼
+- ZMQ 영상/추론 패킷 송수신 런타임
 - 라즈베리파이 엣지 상태머신: `IDLE`, `SCAN`, `DELAY_COMPENSATION`, `TRACKING`, `SAFE_HOLD`, `LIMITED_RESCAN`, `CENTERING`, `ERROR`
+- `Kinit` 연속 검출 기반 능동탐색 확정, 탐색 실패 시 중립각 복귀
 - 픽셀 오차 기반 팬/틸트 PD 제어, deadband, 최대 각속도, 최대 각가속도, PWM 펄스폭 매핑
-- ToF/초음파 센서 기반 단순 임계값 검증과 안전대기 전환
+- ToF/초음파/리밋스위치 기반 단순 임계값 검증과 안전대기 전환
+- 안전대기 soft-stop, 동일 대상 재검출, 제한재탐색, timeout 중립각 복귀
 - 순환버퍼 기반 지연 보정용 프레임/검출 이력 관리
+- WeDetect HTTP 엔드포인트 + Ultralytics YOLO/ByteTrack 계열 production pipeline 경계
 - 실제 하드웨어 없이 동작 확인 가능한 시뮬레이션 드라이버와 단위 테스트
 
 ## 폴더 구조
@@ -52,10 +55,32 @@ iot-simulate
 streamlit run src/iot_servo_tracker/web/app.py
 ```
 
+## 실제 프로세스 실행
+
+MQTT broker와 ZMQ 통신 주소를 `config/settings.toml`에 맞춘 뒤 실행합니다.
+
+RTX 서버:
+
+```bash
+iot-server --config config/settings.toml --serve --production
+```
+
+라즈베리파이 엣지:
+
+```bash
+iot-edge --config config/settings.toml --run
+```
+
+하드웨어 없이 통신 루프만 확인할 때:
+
+```bash
+iot-edge --config config/settings.toml --run --simulated-camera
+```
+
 ## 실제 장비 연결 시 다음 작업
 
 1. `config/settings.example.toml`을 `config/settings.toml`로 복사하고 MQTT/ZMQ 주소와 서보 한계를 환경에 맞춥니다.
-2. `SimulatedServoDriver` 대신 PCA9685 또는 GPIO PWM 드라이버를 구현해 `EdgeRuntime`에 주입합니다.
-3. `SimulatedVisionPipeline` 대신 WeDetect 초기 탐지와 YOLO26 + BoT-SORT 또는 ByteTrack 추적기를 연결합니다.
-4. ToF, 초음파 센서 값을 `SensorSample`로 변환해 엣지 런타임에 넣습니다.
+2. `wedetect_endpoint`, `yolo_model`, `tracker`를 RTX 서버 환경에 맞춥니다.
+3. 라즈베리파이에서는 `iot-edge --run --hardware-servo --hardware-sensors`로 PCA9685 서보와 ToF/초음파/리밋스위치를 사용합니다.
+4. 하드웨어 핀 번호가 다르면 `RaspberryPiSensorReader` 생성 인자를 장비 배선에 맞춥니다.
 5. Kp/Kd, `omega_max`, `alpha_max`, `Tpix`, `Ttof`, `Tultra`, `Nh`를 실제 카메라/서보/전원 환경에서 보수적으로 튜닝합니다.

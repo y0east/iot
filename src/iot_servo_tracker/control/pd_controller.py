@@ -71,6 +71,29 @@ class PDServoController:
         self.state.prev_pitch_error_deg = pitch_error
         return self._integrate(pan_cmd[0], tilt_cmd[0], dt_s)
 
+    def command_current(self) -> ServoCommand:
+        return self._command()
+
+    def scan_pan_step(self, target_pan_deg: float, speed_deg_s: float, dt_s: float) -> ServoCommand:
+        dt_s = max(dt_s, 1e-3)
+        previous_pan = self.state.pan_deg
+        bounded_target = clamp(
+            target_pan_deg,
+            self.config.control.pan.min_deg,
+            self.config.control.pan.max_deg,
+        )
+        max_delta = abs(speed_deg_s) * dt_s
+        self.state.pan_deg = move_toward(previous_pan, bounded_target, max_delta)
+        self.state.tilt_deg = move_toward(
+            self.state.tilt_deg,
+            self.config.control.tilt.center_deg,
+            max_delta,
+        )
+        self.state.pan_omega_deg_s = (self.state.pan_deg - previous_pan) / dt_s
+        if self.state.pan_deg == bounded_target:
+            self.state.pan_omega_deg_s = 0.0
+        return self._command()
+
     def soft_stop(self, dt_s: float) -> ServoCommand:
         return self._integrate(0.0, 0.0, max(dt_s, 1e-3))
 

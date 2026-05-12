@@ -7,6 +7,7 @@ compare timestamps without floating-point drift.
 from __future__ import annotations
 
 import time
+import uuid
 
 
 def now_us() -> int:
@@ -19,4 +20,5 @@ def wall_clock_cmd_id(prefix: str = "cmd") -> str:
     """Create a short human-readable command id."""
 
     stamp_ms = int(time.time() * 1_000)
-    return f"{prefix}-{stamp_ms}"
+    suffix = uuid.uuid4().hex[:8]
+    return f"{prefix}-{stamp_ms}-{suffix}"

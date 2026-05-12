@@ -15,11 +15,16 @@ The project follows the plan from the design PDF:
    - Validates results with ToF and ultrasonic distance samples.
    - Runs the state machine and PD servo controller.
    - Emits status packets for the web screen.
+   - Performs active scan, K-frame initial lock, safe-hold, limited rescan, and center return.
 
 3. Server layer on RTX laptop
    - Performs initial open-vocabulary target selection with WeDetect.
    - Hands the selected box to YOLO26 + BoT-SORT or ByteTrack.
    - Sends timestamped `TrackingResult` packets back to the edge device.
+
+The RTX process binds `zmq.frame_bind_endpoint` and `zmq.result_bind_endpoint`.
+The Raspberry Pi connects to `zmq.frame_connect_endpoint` and
+`zmq.result_connect_endpoint`, so the two roles can run on different hosts.
 
 ## State Flow
 
@@ -86,3 +91,29 @@ The control loop converts image-space target error into servo commands:
 ## Safe Hold
 
 `SAFE_HOLD` is a powered soft-stop, not a full shutdown. New vision coordinates are not used as control input. The controller sets target angular velocity to zero and lets the acceleration limiter bring the mount to a stable stop. Sensor sampling and redetection may continue so the system can recover when the same target is confirmed again.
+
+## Runtime Commands
+
+Run the RTX-side vision process:
+
+```bash
+iot-server --config config/settings.toml --serve --production
+```
+
+Run the Raspberry Pi edge process:
+
+```bash
+iot-edge --config config/settings.toml --run
+```
+
+Run it with real PCA9685 and distance sensors:
+
+```bash
+iot-edge --config config/settings.toml --run --hardware-servo --hardware-sensors
+```
+
+Run the web command surface:
+
+```bash
+streamlit run src/iot_servo_tracker/web/app.py
+```

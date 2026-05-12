@@ -7,7 +7,7 @@ from pathlib import Path
 
 from iot_servo_tracker.common.config import load_config
 from iot_servo_tracker.common.packets import CommandPacket, CommandType, PacketError
-from iot_servo_tracker.comms.mqtt import build_paho_client
+from iot_servo_tracker.comms.mqtt import MqttStatusStore, build_paho_client
 
 
 def main() -> None:
@@ -19,6 +19,7 @@ def main() -> None:
     st.set_page_config(page_title="IoT Servo Tracker", layout="wide")
     config_path = Path("config/settings.toml")
     config = load_config(config_path if config_path.exists() else None)
+    status_store = _status_store(st, config)
 
     st.title("IoT Servo Tracker")
     st.caption("Web command layer. GPIO/PWM control stays on the Raspberry Pi edge process.")
@@ -31,7 +32,10 @@ def main() -> None:
     left, right = st.columns([2, 1])
     with left:
         st.subheader("Live Video")
-        st.info("Connect the processed server stream here.")
+        if config.web.processed_stream_url:
+            st.image(config.web.processed_stream_url)
+        else:
+            st.info("Processed stream URL is not configured.")
 
     with right:
         st.subheader("Command")
@@ -54,6 +58,8 @@ def main() -> None:
         st.subheader("Last command")
         st.json(st.session_state.last_command or {})
         st.subheader("Last status")
+        if status_store is not None and status_store.last_status is not None:
+            st.session_state.last_status = json.loads(status_store.last_status.to_json())
         st.json(st.session_state.last_status or {})
 
 
@@ -73,6 +79,18 @@ def _publish_or_show(st, config, cmd_type: CommandType, query: str = "", scan=45
         st.success(f"Published {command.cmd_type} command")
     except Exception as exc:  # noqa: BLE001
         st.warning(f"MQTT publish skipped: {exc}")
+
+
+def _status_store(st, config):
+    if "mqtt_status_store" in st.session_state:
+        return st.session_state.mqtt_status_store
+    try:
+        st.session_state.mqtt_status_store = MqttStatusStore(config.mqtt)
+        return st.session_state.mqtt_status_store
+    except Exception as exc:  # noqa: BLE001
+        st.session_state.mqtt_status_store = None
+        st.warning(f"MQTT status subscription skipped: {exc}")
+        return None
 
 
 if __name__ == "__main__":

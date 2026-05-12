@@ -45,8 +45,12 @@ class SafetyConfig:
     tof_delta_threshold_mm: float = 40.0
     ultrasonic_jump_threshold_mm: float = 120.0
     consecutive_frames: int = 3
+    default_ping_threshold_ms: float = 250.0
     timeout_min_s: float = 1.5
     timeout_max_s: float = 5.0
+    safe_hold_rescan_delay_s: float = 1.0
+    limited_rescan_range_deg: float = 10.0
+    central_region_ratio: float = 0.60
 
 
 @dataclass(frozen=True)
@@ -68,8 +72,23 @@ class MqttConfig:
 
 @dataclass(frozen=True)
 class ZmqConfig:
-    frame_endpoint: str = "tcp://0.0.0.0:5555"
-    result_endpoint: str = "tcp://0.0.0.0:5556"
+    frame_bind_endpoint: str = "tcp://0.0.0.0:5555"
+    result_bind_endpoint: str = "tcp://0.0.0.0:5556"
+    frame_connect_endpoint: str = "tcp://127.0.0.1:5555"
+    result_connect_endpoint: str = "tcp://127.0.0.1:5556"
+
+
+@dataclass(frozen=True)
+class WebConfig:
+    processed_stream_url: str = ""
+
+
+@dataclass(frozen=True)
+class ServerConfig:
+    wedetect_endpoint: str = ""
+    yolo_model: str = "yolo26n.pt"
+    tracker: str = "bytetrack.yaml"
+    confidence_threshold: float = 0.25
 
 
 @dataclass(frozen=True)
@@ -80,6 +99,8 @@ class AppConfig:
     scan: ScanConfig = field(default_factory=ScanConfig)
     mqtt: MqttConfig = field(default_factory=MqttConfig)
     zmq: ZmqConfig = field(default_factory=ZmqConfig)
+    web: WebConfig = field(default_factory=WebConfig)
+    server: ServerConfig = field(default_factory=ServerConfig)
 
 
 def _axis(data: dict[str, Any], default: AxisLimit) -> AxisLimit:
@@ -117,13 +138,36 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         tilt=_axis(control_raw.get("tilt", {}), default_control.tilt),
     )
 
+    default_zmq = ZmqConfig()
+    zmq_raw = raw.get("zmq", {})
+    zmq = ZmqConfig(
+        frame_bind_endpoint=zmq_raw.get(
+            "frame_bind_endpoint",
+            zmq_raw.get("frame_endpoint", default_zmq.frame_bind_endpoint),
+        ),
+        result_bind_endpoint=zmq_raw.get(
+            "result_bind_endpoint",
+            zmq_raw.get("result_endpoint", default_zmq.result_bind_endpoint),
+        ),
+        frame_connect_endpoint=zmq_raw.get(
+            "frame_connect_endpoint",
+            zmq_raw.get("frame_endpoint", default_zmq.frame_connect_endpoint),
+        ),
+        result_connect_endpoint=zmq_raw.get(
+            "result_connect_endpoint",
+            zmq_raw.get("result_endpoint", default_zmq.result_connect_endpoint),
+        ),
+    )
+
     return AppConfig(
         camera=camera,
         control=control,
         safety=SafetyConfig(**raw.get("safety", {})),
         scan=ScanConfig(**raw.get("scan", {})),
         mqtt=MqttConfig(**raw.get("mqtt", {})),
-        zmq=ZmqConfig(**raw.get("zmq", {})),
+        zmq=zmq,
+        web=WebConfig(**raw.get("web", {})),
+        server=ServerConfig(**raw.get("server", {})),
     )
 
 

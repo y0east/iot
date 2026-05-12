@@ -20,8 +20,12 @@ class VisionRuntime:
             self.pipeline = SimulatedVisionPipeline(self.config.camera)
 
     def process(self, ts_req: int, query: str, frame_bytes: bytes = b"") -> TrackingResult:
-        del frame_bytes
         assert self.pipeline is not None
-        result = self.pipeline.process_frame(ts_req=ts_req, query=query, frame_index=self.frame_index)
+        result = self.pipeline.process_frame(
+            ts_req=ts_req,
+            query=query,
+            frame_bytes=frame_bytes,
+            frame_index=self.frame_index,
+        )
         self.frame_index += 1
         return result

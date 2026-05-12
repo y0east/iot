@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
+from iot_servo_tracker.common.config import AxisLimit
 from iot_servo_tracker.control.pd_controller import ServoCommand
 
 
@@ -28,18 +29,45 @@ class SimulatedServoDriver:
 
 
 class Pca9685ServoDriver:
-    """Placeholder for Raspberry Pi deployment.
+    """PCA9685 servo driver using Adafruit ServoKit."""
 
-    Keep hardware imports out of module import time so tests and local
-    development can run on non-Pi machines.
-    """
-
-    def __init__(self, pan_channel: int = 0, tilt_channel: int = 1) -> None:
+    def __init__(
+        self,
+        pan_limit: AxisLimit,
+        tilt_limit: AxisLimit,
+        pan_channel: int = 0,
+        tilt_channel: int = 1,
+        channels: int = 16,
+    ) -> None:
+        try:
+            from adafruit_servokit import ServoKit
+        except ImportError as exc:
+            raise RuntimeError("Install adafruit-circuitpython-servokit on Raspberry Pi") from exc
+        self.kit = ServoKit(channels=channels)
+        self.pan_limit = pan_limit
+        self.tilt_limit = tilt_limit
         self.pan_channel = pan_channel
         self.tilt_channel = tilt_channel
-        raise NotImplementedError(
-            "Install and wire the PCA9685 library, then implement apply()."
+        self.kit.servo[pan_channel].set_pulse_width_range(
+            pan_limit.pwm_min_us,
+            pan_limit.pwm_max_us,
+        )
+        self.kit.servo[tilt_channel].set_pulse_width_range(
+            tilt_limit.pwm_min_us,
+            tilt_limit.pwm_max_us,
         )
 
     def apply(self, command: ServoCommand) -> None:
-        raise NotImplementedError
+        self.kit.servo[self.pan_channel].angle = _servo_angle(
+            command.pan_deg,
+            self.pan_limit,
+        )
+        self.kit.servo[self.tilt_channel].angle = _servo_angle(
+            command.tilt_deg,
+            self.tilt_limit,
+        )
+
+
+def _servo_angle(angle_deg: float, limit: AxisLimit) -> float:
+    ratio = (angle_deg - limit.min_deg) / (limit.max_deg - limit.min_deg)
+    return min(180.0, max(0.0, ratio * 180.0))

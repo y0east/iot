@@ -8,7 +8,7 @@ from collections import deque
 from dataclasses import dataclass
 from enum import Enum
 
-from iot_servo_tracker.common.config import SafetyConfig
+from iot_servo_tracker.common.config import CameraConfig, SafetyConfig
 from iot_servo_tracker.common.packets import BBox, SensorSample
 
 
@@ -18,6 +18,7 @@ class ValidationCategory(str, Enum):
     SIMILAR_TARGET = "SIMILAR_TARGET"
     OCCLUSION = "OCCLUSION"
     SENSOR_UNAVAILABLE = "SENSOR_UNAVAILABLE"
+    LIMIT_SWITCH = "LIMIT_SWITCH"
 
 
 @dataclass(frozen=True)
@@ -29,8 +30,9 @@ class ValidationResult:
 
 
 class SensorValidator:
-    def __init__(self, config: SafetyConfig) -> None:
+    def __init__(self, config: SafetyConfig, camera: CameraConfig | None = None) -> None:
         self.config = config
+        self.camera = camera
         self.prev_bbox: BBox | None = None
         self.prev_sample: SensorSample | None = None
         self._hit_count = 0
@@ -38,14 +40,19 @@ class SensorValidator:
     def evaluate(self, bbox: BBox | None, sample: SensorSample) -> ValidationResult:
         category = ValidationCategory.OK
         reason = "vision and sensors are consistent"
+        required_hits = self.config.consecutive_frames
 
-        if bbox is None:
+        if sample.limit_switch_active:
+            category = ValidationCategory.LIMIT_SWITCH
+            reason = "limit switch is active"
+            required_hits = 1
+        elif bbox is None:
             category = ValidationCategory.MISSING
             reason = "vision result is missing"
         elif self.prev_bbox is not None and self.prev_sample is not None:
             pixel_jump = _pixel_jump(bbox, self.prev_bbox)
             tof_delta = _delta(sample.tof_mm, self.prev_sample.tof_mm)
-            ultrasonic_delta = _delta(sample.ultrasonic_mm, self.prev_sample.ultrasonic_mm)
+            ultrasonic_drop = _drop(sample.ultrasonic_mm, self.prev_sample.ultrasonic_mm)
 
             if (
                 pixel_jump > self.config.pixel_jump_threshold
@@ -54,12 +61,14 @@ class SensorValidator:
             ):
                 category = ValidationCategory.SIMILAR_TARGET
                 reason = "vision center jumped but ToF distance barely changed"
+                if not self._is_central(bbox):
+                    required_hits = self.config.consecutive_frames + 1
             elif (
-                ultrasonic_delta is not None
-                and ultrasonic_delta > self.config.ultrasonic_jump_threshold_mm
+                ultrasonic_drop is not None
+                and ultrasonic_drop > self.config.ultrasonic_jump_threshold_mm
             ):
                 category = ValidationCategory.OCCLUSION
-                reason = "ultrasonic distance changed abruptly"
+                reason = "ultrasonic distance dropped abruptly"
             elif sample.tof_mm is None and sample.ultrasonic_mm is None:
                 category = ValidationCategory.SENSOR_UNAVAILABLE
                 reason = "no distance sensor sample is available"
@@ -68,6 +77,7 @@ class SensorValidator:
             ValidationCategory.MISSING,
             ValidationCategory.SIMILAR_TARGET,
             ValidationCategory.OCCLUSION,
+            ValidationCategory.LIMIT_SWITCH,
         }:
             self._hit_count += 1
         else:
@@ -77,9 +87,20 @@ class SensorValidator:
         self.prev_sample = sample
         return ValidationResult(
             category=category,
-            safe_hold=self._hit_count >= self.config.consecutive_frames,
+            safe_hold=self._hit_count >= required_hits,
             consecutive_hits=self._hit_count,
             reason=reason,
+        )
+
+    def _is_central(self, bbox: BBox) -> bool:
+        if self.camera is None:
+            return True
+        x, y = bbox.center
+        half_w = self.camera.width * self.config.central_region_ratio / 2.0
+        half_h = self.camera.height * self.config.central_region_ratio / 2.0
+        return (
+            abs(x - self.camera.width / 2.0) <= half_w
+            and abs(y - self.camera.height / 2.0) <= half_h
         )
 
 
@@ -101,8 +122,9 @@ class DelayStats:
         return mean + 3.0 * stdev
 
     def is_delayed(self, rtt_ms: float) -> bool:
+        delayed = rtt_ms > self.threshold_ms
         self.update(rtt_ms)
-        return rtt_ms > self.threshold_ms
+        return delayed
 
 
 def dynamic_timeout_s(
@@ -125,3 +147,9 @@ def _delta(current: float | None, previous: float | None) -> float | None:
     if current is None or previous is None:
         return None
     return abs(current - previous)
+
+
+def _drop(current: float | None, previous: float | None) -> float | None:
+    if current is None or previous is None:
+        return None
+    return previous - current
