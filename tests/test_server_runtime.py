@@ -1,6 +1,7 @@
 import sys
 import types
 import unittest
+from importlib import import_module
 
 from iot_servo_tracker.common.config import AppConfig
 from iot_servo_tracker.common.packets import BBox, TrackingResult
@@ -154,6 +155,11 @@ class VisionRuntimeTests(unittest.TestCase):
         self.assertEqual(result.bbox, BBox(10, 20, 50, 80))
         self.assertEqual(result.confidence, 0.91)
         self.assertEqual(result.track_id, 42)
+
+    def test_real_wedetect_ref_runtime_adapter_is_importable(self) -> None:
+        module = import_module("iot_servo_tracker.server.wedetect_ref_runtime")
+
+        self.assertTrue(callable(module.detect))
 
     def test_yolo_loss_falls_back_to_wedetect_redetection(self) -> None:
         class RedetectClient:
