@@ -14,7 +14,9 @@
 - ToF/초음파/리밋스위치 기반 단순 임계값 검증과 안전대기 전환
 - 안전대기 soft-stop, 동일 대상 재검출, 제한재탐색, timeout 중립각 복귀
 - 순환버퍼 기반 지연 보정용 프레임/검출 이력 관리
-- WeDetect HTTP 엔드포인트 + Ultralytics YOLO/ByteTrack 계열 production pipeline 경계
+- Hugging Face에서 내려받는 WeDetect-Ref + WeDetect-Uni 로컬 추론 경계와 Ultralytics YOLO/ByteTrack 계열 production pipeline 경계
+- YOLO 추적 중 대상이 사라지면 빈 결과를 안전대기 조건으로 전달하고, 연속 상실 시 WeDetect 재검출로 재잠금
+- YOLO가 높은 confidence로 유사 물체를 잡거나 큰 배경/사물 bbox로 흡수되는 경우를 중심 이동량, 면적 증가율, 화면 점유율, 종횡비, ID 변경 시 IoU로 차단
 - 실제 하드웨어 없이 동작 확인 가능한 시뮬레이션 드라이버와 단위 테스트
 
 ## 폴더 구조
@@ -58,7 +60,31 @@ streamlit run src/iot_servo_tracker/web/app.py
 
 ## 실제 프로세스 실행
 
-MQTT broker와 ZMQ 통신 주소를 `config/settings.toml`에 맞춘 뒤 실행합니다.
+MQTT broker와 ZMQ 통신 주소를 `config/settings.toml`에 맞춘 뒤 실행합니다. WeDetect는 네트워크 API 호출 없이 RTX 서버 프로세스 안에서 실행합니다. WeDetect-Ref와 WeDetect-Uni 체크포인트는 Hugging Face Hub에서 내려받고, 실제 추론은 프로젝트 로컬 adapter 모듈이나 스크립트가 담당합니다.
+
+WeDetect-Ref 설정 예시:
+
+```toml
+[server]
+wedetect_ref_repo_id = "fushh7/WeDetect-Ref-2B"
+wedetect_uni_repo_id = "fushh7/WeDetect"
+wedetect_uni_filename = "wedetect_base_uni.pth"
+wedetect_cache_dir = ""
+wedetect_ref_model_dir = ""
+wedetect_uni_checkpoint = ""
+wedetect_ref_module = "my_wedetect_ref_runtime:detect"
+wedetect_ref_script = ""
+wedetect_device = "cuda:0"
+yolo_lost_frames = 3
+yolo_suspect_frames = 2
+yolo_max_center_jump_px = 120.0
+yolo_max_area_growth_ratio = 4.0
+yolo_max_frame_area_ratio = 0.35
+yolo_max_aspect_ratio_change = 3.0
+yolo_min_iou_on_id_change = 0.10
+```
+
+`wedetect_ref_module` callable은 `frame_bytes`, `query`, `ts_req`, `wedetect_ref_model_dir`, `wedetect_uni_checkpoint`, `device` 키워드 인자를 받고, `{"bbox": [x1, y1, x2, y2], "confidence": 0.9, "track_id": 1}` 형태의 dict 또는 `TrackingResult`를 반환하면 됩니다. `wedetect_ref_model_dir`와 `wedetect_uni_checkpoint`를 비워두면 `huggingface-hub`가 설정된 repo에서 자동으로 다운로드합니다. 독립 스크립트를 쓰는 경우 `wedetect_ref_script`에 경로를 넣으면 임시 이미지 파일, WeDetect-Ref 경로, WeDetect-Uni 체크포인트, query가 인자로 전달됩니다.
 
 RTX 서버:
 
@@ -87,7 +113,8 @@ iot-edge --config config/settings.toml --run --simulated-camera
 ## 실제 장비 연결 시 다음 작업
 
 1. `config/settings.example.toml`을 `config/settings.toml`로 복사하고 MQTT/ZMQ 주소와 서보 한계를 환경에 맞춥니다.
-2. `wedetect_endpoint`, `yolo_model`, `tracker`를 RTX 서버 환경에 맞춥니다.
+2. `wedetect_ref_module` 또는 `wedetect_ref_script`, Hugging Face repo 설정, `yolo_model`, `tracker`를 RTX 서버 환경에 맞춥니다.
 3. 라즈베리파이에서는 `iot-edge --run --hardware-servo --hardware-sensors`로 PCA9685 서보와 ToF/초음파/리밋스위치를 사용합니다.
 4. 하드웨어 핀 번호가 다르면 `RaspberryPiSensorReader` 생성 인자를 장비 배선에 맞춥니다.
 5. Kp/Kd, `omega_max`, `alpha_max`, `Tpix`, `Ttof`, `Tultra`, `Nh`를 실제 카메라/서보/전원 환경에서 보수적으로 튜닝합니다.
+6. 유사 물체 오검출이 잦으면 `yolo_max_center_jump_px`와 `yolo_min_iou_on_id_change`를 낮추고, 큰 배경 bbox로 흡수되면 `yolo_max_area_growth_ratio`와 `yolo_max_frame_area_ratio`를 낮춥니다.

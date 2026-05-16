@@ -38,13 +38,24 @@ def require_zmq():
 class ZmqEdgeTransport:
     """Edge-side frame sender and inference-result receiver."""
 
-    def __init__(self, frame_endpoint: str, result_endpoint: str) -> None:
+    def __init__(
+        self,
+        frame_endpoint: str,
+        result_endpoint: str,
+        frame_snd_hwm: int = 1,
+        result_rcv_hwm: int = 1,
+    ) -> None:
         zmq = require_zmq()
         self.zmq = zmq
         self.context = zmq.Context.instance()
         self.frame_socket = self.context.socket(zmq.PUSH)
+        self.frame_socket.setsockopt(zmq.SNDHWM, max(1, frame_snd_hwm))
+        self.frame_socket.setsockopt(zmq.LINGER, 0)
+        self.frame_socket.setsockopt(zmq.IMMEDIATE, 1)
         self.frame_socket.connect(frame_endpoint)
         self.result_socket = self.context.socket(zmq.PULL)
+        self.result_socket.setsockopt(zmq.RCVHWM, max(1, result_rcv_hwm))
+        self.result_socket.setsockopt(zmq.LINGER, 0)
         self.result_socket.connect(result_endpoint)
 
     def send_frame(
@@ -54,7 +65,7 @@ class ZmqEdgeTransport:
         frame_bytes: bytes,
         frame_index: int,
         redetect: bool = False,
-    ) -> None:
+    ) -> bool:
         frame = MultipartFrame(
             header={
                 "packet": "frame",
@@ -65,7 +76,11 @@ class ZmqEdgeTransport:
             },
             payload=frame_bytes,
         )
-        self.frame_socket.send_multipart(frame.encode())
+        try:
+            self.frame_socket.send_multipart(frame.encode(), flags=self.zmq.NOBLOCK)
+        except self.zmq.Again:
+            return False
+        return True
 
     def recv_result(self, timeout_ms: int = 0) -> TrackingResult | None:
         poller = self.zmq.Poller()
@@ -73,9 +88,17 @@ class ZmqEdgeTransport:
         events = dict(poller.poll(timeout_ms))
         if self.result_socket not in events:
             return None
-        parts = self.result_socket.recv_multipart()
-        header = MultipartFrame.decode(parts).header
-        return TrackingResult.from_json(header["result"])
+        latest: TrackingResult | None = None
+        while True:
+            try:
+                parts = self.result_socket.recv_multipart(flags=self.zmq.NOBLOCK)
+            except self.zmq.Again:
+                break
+            header = MultipartFrame.decode(parts).header
+            latest = TrackingResult.from_json(header["result"])
+        if latest is None:
+            return None
+        return latest
 
     def close(self) -> None:
         self.frame_socket.close(linger=0)
@@ -85,13 +108,24 @@ class ZmqEdgeTransport:
 class ZmqVisionTransport:
     """Server-side frame receiver and inference-result sender."""
 
-    def __init__(self, frame_endpoint: str, result_endpoint: str) -> None:
+    def __init__(
+        self,
+        frame_endpoint: str,
+        result_endpoint: str,
+        frame_rcv_hwm: int = 1,
+        result_snd_hwm: int = 1,
+    ) -> None:
         zmq = require_zmq()
         self.zmq = zmq
         self.context = zmq.Context.instance()
         self.frame_socket = self.context.socket(zmq.PULL)
+        self.frame_socket.setsockopt(zmq.RCVHWM, max(1, frame_rcv_hwm))
+        self.frame_socket.setsockopt(zmq.LINGER, 0)
         self.frame_socket.bind(frame_endpoint)
         self.result_socket = self.context.socket(zmq.PUSH)
+        self.result_socket.setsockopt(zmq.SNDHWM, max(1, result_snd_hwm))
+        self.result_socket.setsockopt(zmq.LINGER, 0)
+        self.result_socket.setsockopt(zmq.IMMEDIATE, 1)
         self.result_socket.bind(result_endpoint)
 
     def recv_frame(self, timeout_ms: int = 1000) -> tuple[dict[str, Any], bytes] | None:
@@ -100,12 +134,25 @@ class ZmqVisionTransport:
         events = dict(poller.poll(timeout_ms))
         if self.frame_socket not in events:
             return None
-        frame = MultipartFrame.decode(self.frame_socket.recv_multipart())
-        return frame.header, frame.payload
+        latest: MultipartFrame | None = None
+        while True:
+            try:
+                latest = MultipartFrame.decode(
+                    self.frame_socket.recv_multipart(flags=self.zmq.NOBLOCK)
+                )
+            except self.zmq.Again:
+                break
+        if latest is None:
+            return None
+        return latest.header, latest.payload
 
-    def send_result(self, result: TrackingResult) -> None:
+    def send_result(self, result: TrackingResult) -> bool:
         frame = MultipartFrame(header={"packet": "tracking_result", "result": result.to_json()}, payload=b"")
-        self.result_socket.send_multipart(frame.encode())
+        try:
+            self.result_socket.send_multipart(frame.encode(), flags=self.zmq.NOBLOCK)
+        except self.zmq.Again:
+            return False
+        return True
 
     def close(self) -> None:
         self.frame_socket.close(linger=0)
