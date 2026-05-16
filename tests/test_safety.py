@@ -16,6 +16,17 @@ class SafetyTests(unittest.TestCase):
         self.assertFalse(first.safe_hold)
         self.assertTrue(second.safe_hold)
 
+    def test_stable_similar_target_keeps_original_baseline_until_safe_hold(self) -> None:
+        config = SafetyConfig(consecutive_frames=2, pixel_jump_threshold=50, tof_delta_threshold_mm=20)
+        validator = SensorValidator(config)
+        validator.evaluate(BBox(100, 100, 150, 150), SensorSample(ts=1, tof_mm=500))
+        first = validator.evaluate(BBox(250, 100, 300, 150), SensorSample(ts=2, tof_mm=505))
+        second = validator.evaluate(BBox(250, 100, 300, 150), SensorSample(ts=3, tof_mm=505))
+
+        self.assertEqual(first.category, ValidationCategory.SIMILAR_TARGET)
+        self.assertEqual(second.category, ValidationCategory.SIMILAR_TARGET)
+        self.assertTrue(second.safe_hold)
+
     def test_delay_threshold_uses_default_until_warm(self) -> None:
         stats = DelayStats(default_threshold_ms=100)
         self.assertFalse(stats.is_delayed(90))
@@ -45,6 +56,21 @@ class SafetyTests(unittest.TestCase):
 
         self.assertEqual(first.category, ValidationCategory.BBOX_ABSORPTION)
         self.assertFalse(first.safe_hold)
+        self.assertTrue(second.safe_hold)
+
+    def test_area_growth_absorption_keeps_original_baseline_until_safe_hold(self) -> None:
+        config = SafetyConfig(
+            consecutive_frames=2,
+            bbox_area_growth_threshold=2.0,
+            bbox_frame_area_threshold=0.35,
+        )
+        validator = SensorValidator(config, CameraConfig(width=640, height=480))
+        validator.evaluate(BBox(300, 220, 340, 260), SensorSample(ts=1, tof_mm=500))
+        first = validator.evaluate(BBox(260, 180, 420, 340), SensorSample(ts=2, tof_mm=505))
+        second = validator.evaluate(BBox(260, 180, 420, 340), SensorSample(ts=3, tof_mm=505))
+
+        self.assertEqual(first.category, ValidationCategory.BBOX_ABSORPTION)
+        self.assertEqual(second.category, ValidationCategory.BBOX_ABSORPTION)
         self.assertTrue(second.safe_hold)
 
 

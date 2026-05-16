@@ -89,8 +89,9 @@ class SensorValidator:
         else:
             self._hit_count = 0
 
-        self.prev_bbox = bbox
-        self.prev_sample = sample
+        if category in {ValidationCategory.OK, ValidationCategory.SENSOR_UNAVAILABLE}:
+            self.prev_bbox = bbox
+            self.prev_sample = sample
         return ValidationResult(
             category=category,
             safe_hold=self._hit_count >= required_hits,
