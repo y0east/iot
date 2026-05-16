@@ -21,3 +21,4 @@ preview/
 preview_sips/
 swift_cache/
 pycache_compile/
+validation_outputs/
