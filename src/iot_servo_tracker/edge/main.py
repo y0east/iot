@@ -61,6 +61,8 @@ def run_edge(args: argparse.Namespace) -> None:
     transport = ZmqEdgeTransport(
         config.zmq.frame_connect_endpoint,
         config.zmq.result_connect_endpoint,
+        frame_snd_hwm=config.zmq.frame_snd_hwm,
+        result_rcv_hwm=config.zmq.result_rcv_hwm,
     )
     camera = (
         SimulatedCamera()
@@ -72,26 +74,35 @@ def run_edge(args: argparse.Namespace) -> None:
     bridge.start()
     frame_index = 0
     last_status = runtime.last_status
+    last_loop_s = time.monotonic()
     try:
         while True:
+            loop_s = time.monotonic()
+            dt_s = _bounded_dt_s(loop_s - last_loop_s)
+            last_loop_s = loop_s
             ts_req = now_us()
             frame = camera.read_jpeg()
             query, redetect = runtime.next_frame_request()
             if query:
-                transport.send_frame(
+                if transport.send_frame(
                     ts_req,
                     query,
                     frame,
                     frame_index,
                     redetect=redetect,
-                )
-                frame_index += 1
+                ):
+                    frame_index += 1
             result = transport.recv_result(timeout_ms=1)
             sensor = _read_sensor_sample(sensors)
             if result is not None:
-                last_status = runtime.handle_tracking_result(result, sensor)
+                last_status = runtime.handle_tracking_result(
+                    result,
+                    sensor,
+                    dt_s=dt_s,
+                    received_ts_us=now_us(),
+                )
             else:
-                last_status = runtime.control_step(sensor_sample=sensor)
+                last_status = runtime.control_step(dt_s=dt_s, sensor_sample=sensor)
             bridge.publish_status(last_status)
             time.sleep(0.01)
     except KeyboardInterrupt:
@@ -107,6 +118,10 @@ def _read_sensor_sample(sensors) -> SensorSample:
         return sensors.read()
     except Exception:
         return SensorSample.empty()
+
+
+def _bounded_dt_s(dt_s: float) -> float:
+    return max(0.001, min(dt_s, 0.25))
 
 
 def simulate(argv: list[str] | None = None) -> None:

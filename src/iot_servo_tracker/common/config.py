@@ -81,6 +81,10 @@ class ZmqConfig:
     result_bind_endpoint: str = "tcp://0.0.0.0:5556"
     frame_connect_endpoint: str = "tcp://127.0.0.1:5555"
     result_connect_endpoint: str = "tcp://127.0.0.1:5556"
+    frame_snd_hwm: int = 1
+    frame_rcv_hwm: int = 1
+    result_snd_hwm: int = 1
+    result_rcv_hwm: int = 1
 
 
 @dataclass(frozen=True)
@@ -177,6 +181,10 @@ def load_config(path: str | Path | None = None) -> AppConfig:
             "result_connect_endpoint",
             zmq_raw.get("result_endpoint", default_zmq.result_connect_endpoint),
         ),
+        frame_snd_hwm=zmq_raw.get("frame_snd_hwm", default_zmq.frame_snd_hwm),
+        frame_rcv_hwm=zmq_raw.get("frame_rcv_hwm", default_zmq.frame_rcv_hwm),
+        result_snd_hwm=zmq_raw.get("result_snd_hwm", default_zmq.result_snd_hwm),
+        result_rcv_hwm=zmq_raw.get("result_rcv_hwm", default_zmq.result_rcv_hwm),
     )
 
     return AppConfig(

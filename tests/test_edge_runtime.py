@@ -8,6 +8,10 @@ from iot_servo_tracker.control.states import SystemState
 from iot_servo_tracker.edge.runtime import EdgeRuntime
 
 
+def sensor_sample() -> SensorSample:
+    return SensorSample(ts=now_us(), tof_mm=620.0, ultrasonic_mm=650.0)
+
+
 class EdgeRuntimeTests(unittest.TestCase):
     def test_track_command_is_rejected_while_not_idle(self) -> None:
         runtime = EdgeRuntime(AppConfig())
@@ -38,7 +42,7 @@ class EdgeRuntimeTests(unittest.TestCase):
         config = AppConfig(scan=ScanConfig(confirmation_frames=3))
         runtime = EdgeRuntime(config)
         runtime.handle_command(CommandPacket.create(CommandType.TRACK, query="red cup"))
-        for index in range(2):
+        for _ in range(2):
             result = TrackingResult(
                 packet="tracking_result",
                 ts_req=now_us(),
@@ -48,7 +52,7 @@ class EdgeRuntimeTests(unittest.TestCase):
                 track_id=7,
                 query="red cup",
             )
-            runtime.handle_tracking_result(result, SensorSample.empty())
+            runtime.handle_tracking_result(result, sensor_sample())
             self.assertEqual(runtime.state, SystemState.SCAN)
         result = TrackingResult(
             packet="tracking_result",
@@ -59,7 +63,7 @@ class EdgeRuntimeTests(unittest.TestCase):
             track_id=7,
             query="red cup",
         )
-        runtime.handle_tracking_result(result, SensorSample.empty())
+        runtime.handle_tracking_result(result, sensor_sample())
         self.assertEqual(runtime.state, SystemState.TRACKING)
 
     def test_scan_rejects_far_or_tiny_initial_candidate(self) -> None:
@@ -75,16 +79,17 @@ class EdgeRuntimeTests(unittest.TestCase):
             track_id=7,
             query="red cup",
         )
-        runtime.handle_tracking_result(result, SensorSample.empty())
+        runtime.handle_tracking_result(result, sensor_sample())
         self.assertEqual(runtime.state, SystemState.SCAN)
 
     def test_stale_tracking_result_is_ignored(self) -> None:
         runtime = EdgeRuntime(AppConfig())
         runtime.state_machine.state = SystemState.TRACKING
+        ts = now_us()
         fresh = TrackingResult(
             packet="tracking_result",
-            ts_req=1000,
-            ts_resp=1000,
+            ts_req=ts,
+            ts_resp=0,
             bbox=BBox(300, 220, 340, 260),
             confidence=0.9,
             track_id=7,
@@ -92,19 +97,63 @@ class EdgeRuntimeTests(unittest.TestCase):
         )
         stale = TrackingResult(
             packet="tracking_result",
-            ts_req=900,
-            ts_resp=900,
+            ts_req=ts - 1,
+            ts_resp=0,
             bbox=BBox(100, 100, 150, 150),
             confidence=0.9,
             track_id=7,
             query="red cup",
         )
-        runtime.handle_tracking_result(fresh, SensorSample.empty())
+        runtime.handle_tracking_result(fresh, sensor_sample())
         applied_count = runtime.servo.applied_count
-        status = runtime.handle_tracking_result(stale, SensorSample.empty())
+        status = runtime.handle_tracking_result(stale, sensor_sample())
         self.assertFalse(status.ack)
         self.assertEqual(status.message, "stale tracking result ignored")
         self.assertEqual(runtime.servo.applied_count, applied_count)
+
+    def test_rtt_uses_edge_receive_time_not_server_response_clock(self) -> None:
+        runtime = EdgeRuntime(AppConfig())
+        runtime.state_machine.state = SystemState.TRACKING
+        ts_req = now_us()
+        result = TrackingResult(
+            packet="tracking_result",
+            ts_req=ts_req,
+            ts_resp=42,
+            bbox=BBox(300, 220, 340, 260),
+            confidence=0.9,
+            track_id=7,
+            query="red cup",
+        )
+
+        status = runtime.handle_tracking_result(
+            result,
+            sensor_sample(),
+            received_ts_us=ts_req + 50_000,
+        )
+
+        self.assertAlmostEqual(status.rtt_ms, 50.0)
+        self.assertEqual(runtime.state, SystemState.TRACKING)
+
+    def test_consecutive_sensor_unavailable_enters_safe_hold(self) -> None:
+        config = AppConfig(safety=SafetyConfig(consecutive_frames=2))
+        runtime = EdgeRuntime(config)
+        runtime.state_machine.state = SystemState.TRACKING
+
+        for _ in range(2):
+            runtime.handle_tracking_result(
+                TrackingResult(
+                    packet="tracking_result",
+                    ts_req=now_us(),
+                    ts_resp=0,
+                    bbox=BBox(300, 220, 340, 260),
+                    confidence=0.9,
+                    track_id=7,
+                    query="red cup",
+                ),
+                SensorSample.empty(),
+            )
+
+        self.assertEqual(runtime.state, SystemState.SAFE_HOLD)
 
     def test_redetect_command_sets_one_shot_request(self) -> None:
         runtime = EdgeRuntime(AppConfig())
@@ -160,7 +209,7 @@ class EdgeRuntimeTests(unittest.TestCase):
                 track_id=7,
                 query="red cup",
             ),
-            SensorSample.empty(),
+            sensor_sample(),
         )
 
         self.assertEqual(runtime.state, SystemState.SAFE_HOLD)

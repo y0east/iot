@@ -1,4 +1,6 @@
 [mqtt]
+# 127.0.0.1 is only for single-PC simulation. For Raspberry Pi + RTX split
+# deployment, set this to the MQTT broker IP reachable from both machines.
 host = "127.0.0.1"
 port = 1883
 command_topic = "iot_servo_tracker/command"
@@ -7,8 +9,14 @@ status_topic = "iot_servo_tracker/status"
 [zmq]
 frame_bind_endpoint = "tcp://0.0.0.0:5555"
 result_bind_endpoint = "tcp://0.0.0.0:5556"
+# 127.0.0.1 is only for single-PC simulation. On the Raspberry Pi, replace
+# these with the RTX server IP, for example tcp://192.168.0.20:5555.
 frame_connect_endpoint = "tcp://127.0.0.1:5555"
 result_connect_endpoint = "tcp://127.0.0.1:5556"
+frame_snd_hwm = 1
+frame_rcv_hwm = 1
+result_snd_hwm = 1
+result_rcv_hwm = 1
 
 [web]
 processed_stream_url = ""
@@ -21,7 +29,9 @@ wedetect_uni_filename = "wedetect_base_uni.pth"
 wedetect_cache_dir = ""
 wedetect_ref_model_dir = ""
 wedetect_uni_checkpoint = ""
-wedetect_ref_module = ""
+# Requires WEDETECT_REPO or --wedetect-repo to point at a cloned
+# https://github.com/WeChatCV/WeDetect repository before production startup.
+wedetect_ref_module = "iot_servo_tracker.server.wedetect_ref_runtime:detect"
 wedetect_ref_script = ""
 wedetect_device = "cuda:0"
 yolo_lost_frames = 3

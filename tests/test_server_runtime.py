@@ -1,3 +1,5 @@
+import contextlib
+import io
 import sys
 import types
 import unittest
@@ -5,6 +7,7 @@ from importlib import import_module
 
 from iot_servo_tracker.common.config import AppConfig
 from iot_servo_tracker.common.packets import BBox, TrackingResult
+from iot_servo_tracker.server.main import process_frame_safely
 from iot_servo_tracker.server.runtime import VisionRuntime
 from iot_servo_tracker.server.vision import HuggingFaceWeDetectRefClient, WeDetectYoloPipeline
 
@@ -156,10 +159,63 @@ class VisionRuntimeTests(unittest.TestCase):
         self.assertEqual(result.confidence, 0.91)
         self.assertEqual(result.track_id, 42)
 
+    def test_wedetect_preflight_rejects_missing_adapter_before_download(self) -> None:
+        client = HuggingFaceWeDetectRefClient(ref_model_dir="ref-dir", uni_checkpoint="uni.pth")
+
+        with self.assertRaisesRegex(RuntimeError, "requires wedetect_ref_module"):
+            client.preflight()
+
+    def test_wedetect_preflight_calls_module_preflight(self) -> None:
+        module = types.ModuleType("fake_wedetect_ref_preflight")
+        called = {"preflight": False}
+
+        def preflight():
+            called["preflight"] = True
+
+        def detect(**kwargs):
+            return None
+
+        module.preflight = preflight
+        module.detect = detect
+        sys.modules[module.__name__] = module
+        try:
+            client = HuggingFaceWeDetectRefClient(
+                ref_model_dir="ref-dir",
+                uni_checkpoint="uni.pth",
+                module=f"{module.__name__}:detect",
+                device="cpu",
+            )
+            artifacts = client.preflight()
+        finally:
+            sys.modules.pop(module.__name__, None)
+
+        self.assertTrue(called["preflight"])
+        self.assertEqual(artifacts, ("ref-dir", "uni.pth"))
+
     def test_real_wedetect_ref_runtime_adapter_is_importable(self) -> None:
         module = import_module("iot_servo_tracker.server.wedetect_ref_runtime")
 
         self.assertTrue(callable(module.detect))
+
+    def test_server_frame_exception_returns_empty_result(self) -> None:
+        class FailingPipeline:
+            def process_frame(self, *args, **kwargs):
+                raise RuntimeError("decode failed")
+
+        runtime = VisionRuntime(AppConfig(), pipeline=FailingPipeline())
+
+        with contextlib.redirect_stderr(io.StringIO()):
+            result = process_frame_safely(
+                runtime,
+                ts_req=123,
+                query="red cup",
+                frame_bytes=b"bad-jpeg",
+                redetect=False,
+            )
+
+        self.assertIsNone(result.bbox)
+        self.assertEqual(result.ts_req, 123)
+        self.assertEqual(result.query, "red cup")
 
     def test_yolo_loss_falls_back_to_wedetect_redetection(self) -> None:
         class RedetectClient:

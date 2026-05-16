@@ -142,18 +142,26 @@ class EdgeRuntime:
         result: TrackingResult,
         sensor_sample: SensorSample | None = None,
         dt_s: float = 0.033,
+        received_ts_us: int | None = None,
     ) -> StatusAck:
         with self._lock:
-            return self._handle_tracking_result_unlocked(result, sensor_sample, dt_s)
+            return self._handle_tracking_result_unlocked(
+                result,
+                sensor_sample,
+                dt_s,
+                received_ts_us,
+            )
 
     def _handle_tracking_result_unlocked(
         self,
         result: TrackingResult,
         sensor_sample: SensorSample | None = None,
         dt_s: float = 0.033,
+        received_ts_us: int | None = None,
     ) -> StatusAck:
         sensor_sample = sensor_sample or SensorSample.empty()
-        rtt_ms = max((result.ts_resp - result.ts_req) / 1_000.0, 0.0)
+        received_ts_us = received_ts_us or now_us()
+        rtt_ms = max((received_ts_us - result.ts_req) / 1_000.0, 0.0)
         if self.last_result_ts_req and result.ts_req <= self.last_result_ts_req:
             return self._status(
                 "stale tracking result ignored",

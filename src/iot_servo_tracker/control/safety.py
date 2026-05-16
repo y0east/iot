@@ -42,11 +42,15 @@ class SensorValidator:
         category = ValidationCategory.OK
         reason = "vision and sensors are consistent"
         required_hits = self.config.consecutive_frames
+        sensors_unavailable = sample.tof_mm is None and sample.ultrasonic_mm is None
 
         if sample.limit_switch_active:
             category = ValidationCategory.LIMIT_SWITCH
             reason = "limit switch is active"
             required_hits = 1
+        elif sensors_unavailable:
+            category = ValidationCategory.SENSOR_UNAVAILABLE
+            reason = "no distance sensor sample is available"
         elif bbox is None:
             category = ValidationCategory.MISSING
             reason = "vision result is missing"
@@ -74,15 +78,12 @@ class SensorValidator:
             ):
                 category = ValidationCategory.OCCLUSION
                 reason = "ultrasonic distance dropped abruptly"
-            elif sample.tof_mm is None and sample.ultrasonic_mm is None:
-                category = ValidationCategory.SENSOR_UNAVAILABLE
-                reason = "no distance sensor sample is available"
-
         if category in {
             ValidationCategory.MISSING,
             ValidationCategory.SIMILAR_TARGET,
             ValidationCategory.BBOX_ABSORPTION,
             ValidationCategory.OCCLUSION,
+            ValidationCategory.SENSOR_UNAVAILABLE,
             ValidationCategory.LIMIT_SWITCH,
         }:
             self._hit_count += 1

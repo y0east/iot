@@ -272,7 +272,7 @@ def check_edge_safety_smoke() -> None:
             track_id=7,
             query="red cup",
         ),
-        SensorSample.empty(),
+        SensorSample(ts=now_us(), tof_mm=620.0, ultrasonic_mm=650.0),
     )
     if runtime.state == SystemState.TRACKING:
         raise RuntimeError("safe hold recovered to a large absorbed bbox")

@@ -47,6 +47,17 @@ class SafetyTests(unittest.TestCase):
         closer = validator.evaluate(BBox(0, 0, 10, 10), SensorSample(ts=3, ultrasonic_mm=100))
         self.assertTrue(closer.safe_hold)
 
+    def test_sensor_unavailable_counts_as_safe_hold_hit(self) -> None:
+        config = SafetyConfig(consecutive_frames=2)
+        validator = SensorValidator(config)
+
+        first = validator.evaluate(BBox(0, 0, 10, 10), SensorSample.empty())
+        second = validator.evaluate(BBox(0, 0, 10, 10), SensorSample.empty())
+
+        self.assertEqual(first.category, ValidationCategory.SENSOR_UNAVAILABLE)
+        self.assertFalse(first.safe_hold)
+        self.assertTrue(second.safe_hold)
+
     def test_large_background_bbox_counts_as_absorption(self) -> None:
         config = SafetyConfig(consecutive_frames=2, bbox_frame_area_threshold=0.20)
         validator = SensorValidator(config, CameraConfig(width=640, height=480))

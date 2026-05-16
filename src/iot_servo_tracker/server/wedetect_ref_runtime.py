@@ -9,6 +9,7 @@ importable on ``PYTHONPATH``.
 from __future__ import annotations
 
 import copy
+import importlib.util
 import os
 import sys
 import tempfile
@@ -22,6 +23,27 @@ from iot_servo_tracker.common.timebase import now_us
 
 _RUNTIME: "_WeDetectRefRuntime | None" = None
 _RUNTIME_KEY: tuple[str, str, str, str, str, int] | None = None
+
+
+def preflight() -> dict[str, str]:
+    """Validate that the official WeDetect repository and imports are ready."""
+
+    repo = _prepare_official_repo()
+    try:
+        import torch  # noqa: F401
+        from generate_proposal import SimpleYOLOWorldDetector  # noqa: F401
+        from transformers import AutoProcessor  # noqa: F401
+        from wedetect_ref.models.qwen3vl_referring import (  # noqa: F401
+            Qwen3VLGroundingForConditionalGeneration,
+        )
+        from wedetect_ref.models.vision_process import process_vision_info  # noqa: F401
+    except ImportError as exc:
+        raise RuntimeError(
+            "Official WeDetect imports failed during preflight. Set WEDETECT_REPO "
+            "to a cloned WeChatCV/WeDetect repository and install its WeDetect-Ref "
+            "dependencies before starting the production server."
+        ) from exc
+    return {"wedetect_repo": str(repo)}
 
 
 def detect(
@@ -85,7 +107,22 @@ def _prepare_official_repo() -> Path:
         if repo_text not in sys.path:
             sys.path.insert(0, repo_text)
         return repo
-    return Path.cwd()
+    if _module_available("generate_proposal") and _module_available(
+        "wedetect_ref.models.qwen3vl_referring"
+    ):
+        return Path.cwd()
+    raise RuntimeError(
+        "WEDETECT_REPO is not set and official WeDetect modules are not importable. "
+        "Clone https://github.com/WeChatCV/WeDetect and pass --wedetect-repo, or "
+        "add that repository to PYTHONPATH."
+    )
+
+
+def _module_available(name: str) -> bool:
+    try:
+        return importlib.util.find_spec(name) is not None
+    except ModuleNotFoundError:
+        return False
 
 
 @dataclass

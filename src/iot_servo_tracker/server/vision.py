@@ -131,6 +131,29 @@ class HuggingFaceWeDetectRefClient:
             )
         return ref_model_dir, uni_checkpoint
 
+    def preflight(self) -> tuple[str, str]:
+        if not self.module and not self.script:
+            raise RuntimeError(
+                "Production WeDetect-Ref requires wedetect_ref_module or "
+                "wedetect_ref_script before model artifacts are downloaded"
+            )
+        if self.module:
+            module_name, _, function_name = self.module.partition(":")
+            function_name = function_name or "detect"
+            module = importlib.import_module(module_name)
+            if not hasattr(module, function_name):
+                raise RuntimeError(
+                    f"WeDetect-Ref module {module_name!r} has no {function_name!r} callable"
+                )
+            preflight = getattr(module, "preflight", None)
+            if callable(preflight):
+                preflight()
+        if self.script:
+            script_path = Path(self.script)
+            if not script_path.exists():
+                raise RuntimeError(f"WeDetect-Ref script does not exist: {script_path}")
+        return self.resolve_artifacts()
+
     def _detect_with_module(
         self,
         frame_bytes: bytes,
