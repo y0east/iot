@@ -44,6 +44,9 @@ class SafetyConfig:
     pixel_jump_threshold: float = 80.0
     tof_delta_threshold_mm: float = 40.0
     ultrasonic_jump_threshold_mm: float = 120.0
+    bbox_area_growth_threshold: float = 4.0
+    bbox_frame_area_threshold: float = 0.35
+    bbox_aspect_ratio_change_threshold: float = 3.0
     consecutive_frames: int = 3
     default_ping_threshold_ms: float = 250.0
     timeout_min_s: float = 1.5
@@ -87,7 +90,22 @@ class WebConfig:
 
 @dataclass(frozen=True)
 class ServerConfig:
-    wedetect_endpoint: str = ""
+    wedetect_ref_repo_id: str = "fushh7/WeDetect-Ref-2B"
+    wedetect_uni_repo_id: str = "fushh7/WeDetect"
+    wedetect_uni_filename: str = "wedetect_base_uni.pth"
+    wedetect_cache_dir: str = ""
+    wedetect_ref_model_dir: str = ""
+    wedetect_uni_checkpoint: str = ""
+    wedetect_ref_module: str = ""
+    wedetect_ref_script: str = ""
+    wedetect_device: str = "cuda:0"
+    yolo_lost_frames: int = 3
+    yolo_suspect_frames: int = 2
+    yolo_max_center_jump_px: float = 120.0
+    yolo_max_area_growth_ratio: float = 4.0
+    yolo_max_frame_area_ratio: float = 0.35
+    yolo_max_aspect_ratio_change: float = 3.0
+    yolo_min_iou_on_id_change: float = 0.10
     yolo_model: str = "yolo26n.pt"
     tracker: str = "bytetrack.yaml"
     confidence_threshold: float = 0.25

@@ -8,12 +8,23 @@ from __future__ import annotations
 
 import time
 import uuid
+from threading import Lock
+
+
+_now_lock = Lock()
+_last_now_us = 0
 
 
 def now_us() -> int:
-    """Return a monotonic timestamp in microseconds."""
+    """Return a strictly increasing monotonic timestamp in microseconds."""
 
-    return time.monotonic_ns() // 1_000
+    global _last_now_us
+    current = time.monotonic_ns() // 1_000
+    with _now_lock:
+        if current <= _last_now_us:
+            current = _last_now_us + 1
+        _last_now_us = current
+        return current
 
 
 def wall_clock_cmd_id(prefix: str = "cmd") -> str:

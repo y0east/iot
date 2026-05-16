@@ -16,6 +16,7 @@ class ValidationCategory(str, Enum):
     OK = "OK"
     MISSING = "MISSING"
     SIMILAR_TARGET = "SIMILAR_TARGET"
+    BBOX_ABSORPTION = "BBOX_ABSORPTION"
     OCCLUSION = "OCCLUSION"
     SENSOR_UNAVAILABLE = "SENSOR_UNAVAILABLE"
     LIMIT_SWITCH = "LIMIT_SWITCH"
@@ -53,8 +54,12 @@ class SensorValidator:
             pixel_jump = _pixel_jump(bbox, self.prev_bbox)
             tof_delta = _delta(sample.tof_mm, self.prev_sample.tof_mm)
             ultrasonic_drop = _drop(sample.ultrasonic_mm, self.prev_sample.ultrasonic_mm)
+            bbox_absorption_reason = self._bbox_absorption_reason(bbox, self.prev_bbox)
 
-            if (
+            if bbox_absorption_reason is not None:
+                category = ValidationCategory.BBOX_ABSORPTION
+                reason = bbox_absorption_reason
+            elif (
                 pixel_jump > self.config.pixel_jump_threshold
                 and tof_delta is not None
                 and tof_delta < self.config.tof_delta_threshold_mm
@@ -76,6 +81,7 @@ class SensorValidator:
         if category in {
             ValidationCategory.MISSING,
             ValidationCategory.SIMILAR_TARGET,
+            ValidationCategory.BBOX_ABSORPTION,
             ValidationCategory.OCCLUSION,
             ValidationCategory.LIMIT_SWITCH,
         }:
@@ -102,6 +108,23 @@ class SensorValidator:
             abs(x - self.camera.width / 2.0) <= half_w
             and abs(y - self.camera.height / 2.0) <= half_h
         )
+
+    def _bbox_absorption_reason(self, bbox: BBox, previous: BBox) -> str | None:
+        frame_area = None
+        if self.camera is not None and self.camera.width > 0 and self.camera.height > 0:
+            frame_area = self.camera.width * self.camera.height
+        if frame_area and bbox.area / frame_area > self.config.bbox_frame_area_threshold:
+            return "vision bbox is too large for the expected target"
+
+        if previous.area > 0:
+            area_growth = bbox.area / previous.area
+            if area_growth > self.config.bbox_area_growth_threshold:
+                return "vision bbox grew too much between frames"
+
+        aspect_change = _aspect_ratio_change(bbox, previous)
+        if aspect_change > self.config.bbox_aspect_ratio_change_threshold:
+            return "vision bbox aspect ratio changed too much"
+        return None
 
 
 class DelayStats:
@@ -153,3 +176,13 @@ def _drop(current: float | None, previous: float | None) -> float | None:
     if current is None or previous is None:
         return None
     return previous - current
+
+
+def _aspect_ratio_change(current: BBox, previous: BBox) -> float:
+    current_width = max(current.x2 - current.x1, 1e-6)
+    current_height = max(current.y2 - current.y1, 1e-6)
+    previous_width = max(previous.x2 - previous.x1, 1e-6)
+    previous_height = max(previous.y2 - previous.y1, 1e-6)
+    current_ratio = current_width / current_height
+    previous_ratio = previous_width / previous_height
+    return max(current_ratio / previous_ratio, previous_ratio / current_ratio)

@@ -8,6 +8,7 @@ from threading import RLock
 
 from iot_servo_tracker.common.config import AppConfig
 from iot_servo_tracker.common.packets import (
+    BBox,
     CommandPacket,
     CommandType,
     SensorSample,
@@ -386,18 +387,33 @@ class EdgeRuntime:
     def _is_same_target(self, result: TrackingResult) -> bool:
         if self.last_valid_result is None:
             return result.bbox is not None
+        if result.bbox is None or self.last_valid_result.bbox is None:
+            return False
+        if not self._bbox_continuity_ok(result.bbox, self.last_valid_result.bbox):
+            return False
         if (
             result.track_id is not None
             and self.last_valid_result.track_id is not None
             and result.track_id == self.last_valid_result.track_id
         ):
             return True
-        if result.bbox is None or self.last_valid_result.bbox is None:
-            return False
         x0, y0 = self.last_valid_result.bbox.center
         x1, y1 = result.bbox.center
         distance = ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5
         return distance <= self.config.safety.pixel_jump_threshold * 2.0
+
+    def _bbox_continuity_ok(self, bbox: BBox, previous: BBox) -> bool:
+        frame_area = self.config.camera.width * self.config.camera.height
+        if frame_area > 0 and bbox.area / frame_area > self.config.safety.bbox_frame_area_threshold:
+            return False
+        if previous.area > 0 and bbox.area / previous.area > self.config.safety.bbox_area_growth_threshold:
+            return False
+        if (
+            _aspect_ratio_change(bbox, previous)
+            > self.config.safety.bbox_aspect_ratio_change_threshold
+        ):
+            return False
+        return True
 
     def _is_initial_scan_candidate(self, result: TrackingResult) -> bool:
         if result.bbox is None or result.confidence < self.config.scan.confidence_threshold:
@@ -452,3 +468,13 @@ def _bbox_grid_key(result: TrackingResult) -> str:
         return ""
     x, y = result.bbox.center
     return f"{round(x / 20)}:{round(y / 20)}"
+
+
+def _aspect_ratio_change(current: BBox, previous: BBox) -> float:
+    current_width = max(current.x2 - current.x1, 1e-6)
+    current_height = max(current.y2 - current.y1, 1e-6)
+    previous_width = max(previous.x2 - previous.x1, 1e-6)
+    previous_height = max(previous.y2 - previous.y1, 1e-6)
+    current_ratio = current_width / current_height
+    previous_ratio = previous_width / previous_height
+    return max(current_ratio / previous_ratio, previous_ratio / current_ratio)

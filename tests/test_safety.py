@@ -1,6 +1,6 @@
 import unittest
 
-from iot_servo_tracker.common.config import SafetyConfig
+from iot_servo_tracker.common.config import CameraConfig, SafetyConfig
 from iot_servo_tracker.common.packets import BBox, SensorSample
 from iot_servo_tracker.control.safety import DelayStats, SensorValidator, ValidationCategory
 
@@ -35,6 +35,17 @@ class SafetyTests(unittest.TestCase):
         self.assertFalse(farther.safe_hold)
         closer = validator.evaluate(BBox(0, 0, 10, 10), SensorSample(ts=3, ultrasonic_mm=100))
         self.assertTrue(closer.safe_hold)
+
+    def test_large_background_bbox_counts_as_absorption(self) -> None:
+        config = SafetyConfig(consecutive_frames=2, bbox_frame_area_threshold=0.20)
+        validator = SensorValidator(config, CameraConfig(width=640, height=480))
+        validator.evaluate(BBox(300, 220, 340, 260), SensorSample(ts=1, tof_mm=500))
+        first = validator.evaluate(BBox(100, 80, 600, 460), SensorSample(ts=2, tof_mm=505))
+        second = validator.evaluate(BBox(100, 80, 600, 460), SensorSample(ts=3, tof_mm=505))
+
+        self.assertEqual(first.category, ValidationCategory.BBOX_ABSORPTION)
+        self.assertFalse(first.safe_hold)
+        self.assertTrue(second.safe_hold)
 
 
 if __name__ == "__main__":

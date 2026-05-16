@@ -130,6 +130,42 @@ class EdgeRuntimeTests(unittest.TestCase):
         runtime.control_step()
         self.assertEqual(runtime.state, SystemState.CENTERING)
 
+    def test_safe_hold_does_not_recover_to_large_bbox_even_with_same_track_id(self) -> None:
+        config = AppConfig(
+            safety=SafetyConfig(
+                bbox_frame_area_threshold=0.20,
+                safe_hold_rescan_delay_s=10.0,
+            )
+        )
+        runtime = EdgeRuntime(config)
+        runtime.state_machine.state = SystemState.SAFE_HOLD
+        runtime.safe_hold_started_us = now_us()
+        runtime.last_valid_result = TrackingResult(
+            packet="tracking_result",
+            ts_req=1,
+            ts_resp=2,
+            bbox=BBox(300, 220, 340, 260),
+            confidence=0.9,
+            track_id=7,
+            query="red cup",
+        )
+
+        status = runtime.handle_tracking_result(
+            TrackingResult(
+                packet="tracking_result",
+                ts_req=now_us(),
+                ts_resp=now_us(),
+                bbox=BBox(100, 80, 600, 460),
+                confidence=0.99,
+                track_id=7,
+                query="red cup",
+            ),
+            SensorSample.empty(),
+        )
+
+        self.assertEqual(runtime.state, SystemState.SAFE_HOLD)
+        self.assertNotEqual(status.system_state, SystemState.TRACKING.value)
+
 
 if __name__ == "__main__":
     unittest.main()
