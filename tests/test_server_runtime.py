@@ -159,6 +159,35 @@ class VisionRuntimeTests(unittest.TestCase):
         self.assertEqual(result.confidence, 0.91)
         self.assertEqual(result.track_id, 42)
 
+    def test_person_query_is_canonicalized_for_wedetect_ref(self) -> None:
+        module = types.ModuleType("fake_wedetect_ref_query")
+        seen = {}
+
+        def detect(**kwargs):
+            seen["query"] = kwargs["query"]
+            return {
+                "bbox": [10, 20, 50, 80],
+                "confidence": 0.91,
+                "track_id": 42,
+                "query": kwargs["query"],
+            }
+
+        module.detect = detect
+        sys.modules[module.__name__] = module
+        try:
+            client = HuggingFaceWeDetectRefClient(
+                ref_model_dir="ref-dir",
+                uni_checkpoint="uni.pth",
+                module=f"{module.__name__}:detect",
+                device="cpu",
+            )
+            result = client.detect(b"jpeg-bytes", "see man", ts_req=123)
+        finally:
+            sys.modules.pop(module.__name__, None)
+
+        self.assertEqual(seen["query"], "person")
+        self.assertEqual(result.query, "see man")
+
     def test_wedetect_preflight_rejects_missing_adapter_before_download(self) -> None:
         client = HuggingFaceWeDetectRefClient(ref_model_dir="ref-dir", uni_checkpoint="uni.pth")
 
@@ -250,6 +279,23 @@ class VisionRuntimeTests(unittest.TestCase):
         self.assertEqual(pipeline.yolo_lost_count, 0)
         self.assertEqual(pipeline.wedetect_client.calls, 1)
 
+    def test_default_yolo_loss_window_waits_before_redetect(self) -> None:
+        class EmptyYolo:
+            def track(self, *args, **kwargs):
+                return []
+
+        redetect = EmptyRedetectClient()
+        pipeline = build_test_pipeline(EmptyYolo(), redetect)
+        pipeline.yolo_lost_frames = AppConfig().server.yolo_lost_frames
+
+        for ts_req in (10, 20, 30):
+            result = pipeline.process_frame(ts_req=ts_req, query="person", frame_bytes=b"jpeg")
+
+        self.assertEqual(AppConfig().server.yolo_lost_frames, 12)
+        self.assertIsNone(result.bbox)
+        self.assertEqual(pipeline.yolo_lost_count, 3)
+        self.assertEqual(redetect.calls, 0)
+
     def test_rejects_high_confidence_similar_object_switch(self) -> None:
         yolo = FakeYolo([FakeResult([([520, 220, 560, 260], 0.99, 8)])])
         redetect = EmptyRedetectClient()
@@ -280,6 +326,16 @@ class VisionRuntimeTests(unittest.TestCase):
 
         self.assertEqual(result.bbox, BBox(305, 222, 345, 262))
         self.assertEqual(pipeline.locked_track_id, 7)
+        self.assertEqual(pipeline.wedetect_client.calls, 0)
+
+    def test_accepts_spatially_stable_candidate_when_track_id_changes(self) -> None:
+        yolo = FakeYolo([FakeResult([([336, 220, 376, 260], 0.99, 8)])])
+        pipeline = build_test_pipeline(yolo)
+
+        result = pipeline.process_frame(ts_req=10, query="person", frame_bytes=b"jpeg")
+
+        self.assertEqual(result.bbox, BBox(336, 220, 376, 260))
+        self.assertEqual(pipeline.locked_track_id, 8)
         self.assertEqual(pipeline.wedetect_client.calls, 0)
 
     def test_rejected_redetect_candidate_is_not_accepted_next_frame_as_new_lock(self) -> None:

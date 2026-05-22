@@ -103,7 +103,7 @@ class ServerConfig:
     wedetect_ref_module: str = ""
     wedetect_ref_script: str = ""
     wedetect_device: str = "cuda:0"
-    yolo_lost_frames: int = 3
+    yolo_lost_frames: int = 12
     yolo_suspect_frames: int = 2
     yolo_max_center_jump_px: float = 120.0
     yolo_max_area_growth_ratio: float = 4.0

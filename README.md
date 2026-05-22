@@ -16,7 +16,7 @@
 - 순환버퍼 기반 지연 보정용 프레임/검출 이력 관리
 - Hugging Face에서 내려받는 WeDetect-Ref + WeDetect-Uni 로컬 추론 경계와 Ultralytics YOLO/ByteTrack 계열 production pipeline 경계
 - YOLO 추적 중 대상이 사라지면 빈 결과를 안전대기 조건으로 전달하고, 연속 상실 시 WeDetect 재검출로 재잠금
-- YOLO가 높은 confidence로 유사 물체를 잡거나 큰 배경/사물 bbox로 흡수되는 경우를 중심 이동량, 면적 증가율, 화면 점유율, 종횡비, ID 변경 시 IoU로 차단
+- YOLO가 높은 confidence로 유사 물체를 잡거나 큰 배경/사물 bbox로 흡수되는 경우를 중심 이동량, 면적 증가율, 화면 점유율, 종횡비, ID 변경 시 IoU로 차단하되, 짧은 ID 변경은 위치/면적이 안정적이면 같은 대상으로 유지
 - 실제 하드웨어 없이 동작 확인 가능한 시뮬레이션 드라이버와 단위 테스트
 
 ## 폴더 구조
@@ -75,7 +75,7 @@ wedetect_uni_checkpoint = ""
 wedetect_ref_module = "my_wedetect_ref_runtime:detect"
 wedetect_ref_script = ""
 wedetect_device = "cuda:0"
-yolo_lost_frames = 3
+yolo_lost_frames = 12
 yolo_suspect_frames = 2
 yolo_max_center_jump_px = 120.0
 yolo_max_area_growth_ratio = 4.0
@@ -83,6 +83,8 @@ yolo_max_frame_area_ratio = 0.35
 yolo_max_aspect_ratio_change = 3.0
 yolo_min_iou_on_id_change = 0.10
 ```
+
+`yolo_lost_frames = 12`는 12 FPS 기준 약 1초 분량입니다. 짧은 YOLO/ByteTrack 흔들림에는 빈 결과를 반환하며 기다리고, 연속 상실이 길어질 때만 무거운 WeDetect-Ref 재검출로 넘어갑니다.
 
 `wedetect_ref_module` callable은 `frame_bytes`, `query`, `ts_req`, `wedetect_ref_model_dir`, `wedetect_uni_checkpoint`, `device` 키워드 인자를 받고, `{"bbox": [x1, y1, x2, y2], "confidence": 0.9, "track_id": 1}` 형태의 dict 또는 `TrackingResult`를 반환하면 됩니다. `wedetect_ref_model_dir`와 `wedetect_uni_checkpoint`를 비워두면 `huggingface-hub`가 설정된 repo에서 자동으로 다운로드합니다. 독립 스크립트를 쓰는 경우 `wedetect_ref_script`에 경로를 넣으면 임시 이미지 파일, WeDetect-Ref 경로, WeDetect-Uni 체크포인트, query가 인자로 전달됩니다.
 

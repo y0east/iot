@@ -34,7 +34,8 @@ wedetect_uni_checkpoint = ""
 wedetect_ref_module = "iot_servo_tracker.server.wedetect_ref_runtime:detect"
 wedetect_ref_script = ""
 wedetect_device = "cuda:0"
-yolo_lost_frames = 3
+# About one second at 12 FPS; avoids expensive redetection on brief tracker gaps.
+yolo_lost_frames = 12
 yolo_suspect_frames = 2
 yolo_max_center_jump_px = 120.0
 yolo_max_area_growth_ratio = 4.0

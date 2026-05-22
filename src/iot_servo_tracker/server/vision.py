@@ -14,6 +14,7 @@ from typing import Any, Protocol
 
 from iot_servo_tracker.common.config import CameraConfig, ServerConfig
 from iot_servo_tracker.common.packets import BBox, TrackingResult
+from iot_servo_tracker.common.query import canonical_detection_query
 from iot_servo_tracker.common.timebase import now_us
 
 
@@ -84,23 +85,26 @@ class HuggingFaceWeDetectRefClient:
     timeout_s: float = 30.0
 
     def detect(self, frame_bytes: bytes, query: str, ts_req: int) -> TrackingResult:
+        model_query = canonical_detection_query(query)
         ref_model_dir, uni_checkpoint = self.resolve_artifacts()
         if self.module:
-            return self._detect_with_module(
+            result = self._detect_with_module(
                 frame_bytes,
-                query,
+                model_query,
                 ts_req,
                 ref_model_dir,
                 uni_checkpoint,
             )
+            return _with_query(result, query)
         if self.script:
-            return self._detect_with_script(
+            result = self._detect_with_script(
                 frame_bytes,
-                query,
+                model_query,
                 ts_req,
                 ref_model_dir,
                 uni_checkpoint,
             )
+            return _with_query(result, query)
         raise RuntimeError(
             "WeDetect-Ref requires wedetect_ref_module or wedetect_ref_script after "
             "downloading Hugging Face artifacts"
@@ -228,7 +232,7 @@ class WeDetectYoloPipeline:
         yolo_model: str = "yolo26n.pt",
         tracker: str = "bytetrack.yaml",
         confidence_threshold: float = 0.25,
-        yolo_lost_frames: int = 3,
+        yolo_lost_frames: int = 12,
         yolo_suspect_frames: int = 2,
         yolo_max_center_jump_px: float = 120.0,
         yolo_max_area_growth_ratio: float = 4.0,
@@ -460,9 +464,17 @@ class WeDetectYoloPipeline:
             and track_id is not None
             and track_id != self.locked_track_id
             and _iou(bbox, previous) < self.yolo_min_iou_on_id_change
+            and not self._stable_id_change_candidate(bbox, previous)
         ):
             return "YOLO candidate track id changed without enough overlap"
         return None
+
+    def _stable_id_change_candidate(self, bbox: BBox, previous: BBox) -> bool:
+        center_limit = min(self.yolo_max_center_jump_px, 48.0)
+        return (
+            _center_distance(bbox, previous) <= center_limit
+            and _area_ratio_ok(bbox, previous, max_ratio=2.0)
+        )
 
 
 def build_wedetect_client(config: ServerConfig) -> WeDetectClient:
@@ -506,6 +518,20 @@ def _tracking_result_from_payload(
     )
 
 
+def _with_query(result: TrackingResult, query: str) -> TrackingResult:
+    if result.query == query:
+        return result
+    return TrackingResult(
+        packet=result.packet,
+        ts_req=result.ts_req,
+        ts_resp=result.ts_resp,
+        bbox=result.bbox,
+        confidence=result.confidence,
+        track_id=result.track_id,
+        query=query,
+    )
+
+
 def _center_distance(a: BBox, b: BBox | None) -> float:
     if b is None:
         return 0.0
@@ -530,6 +556,13 @@ def _aspect_ratio_change(current: BBox, previous: BBox) -> float:
     current_ratio = current_width / current_height
     previous_ratio = previous_width / previous_height
     return max(current_ratio / previous_ratio, previous_ratio / current_ratio)
+
+
+def _area_ratio_ok(current: BBox, previous: BBox, max_ratio: float) -> bool:
+    if current.area <= 0 or previous.area <= 0:
+        return False
+    ratio = current.area / previous.area
+    return (1.0 / max_ratio) <= ratio <= max_ratio
 
 
 def _iou(a: BBox, b: BBox) -> float:
