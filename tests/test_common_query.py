@@ -15,8 +15,11 @@ class QueryTests(unittest.TestCase):
     def test_query_matches_detector_class_without_substring_false_positive(self) -> None:
         self.assertTrue(query_matches_class("people", "person"))
         self.assertTrue(query_matches_class("see man", "person"))
+        self.assertTrue(query_matches_class("smartphone", "cell phone"))
+        self.assertTrue(query_matches_class("mobile phone", "cell phone"))
         self.assertTrue(query_matches_class("red cup", "cup"))
         self.assertFalse(query_matches_class("red carpet", "car"))
+        self.assertFalse(query_matches_class("smartphone", "person"))
 
 
 if __name__ == "__main__":

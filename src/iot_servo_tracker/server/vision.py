@@ -14,7 +14,7 @@ from typing import Any, Protocol
 
 from iot_servo_tracker.common.config import CameraConfig, ServerConfig
 from iot_servo_tracker.common.packets import BBox, TrackingResult
-from iot_servo_tracker.common.query import canonical_detection_query
+from iot_servo_tracker.common.query import canonical_detection_query, query_matches_class
 from iot_servo_tracker.common.timebase import now_us
 
 
@@ -306,7 +306,7 @@ class WeDetectYoloPipeline:
             conf=self.confidence_threshold,
             verbose=False,
         )
-        best = self._select_box(results)
+        best = self._select_box(results, query)
         if best is None:
             if self.last_yolo_reject_reason:
                 return self._handle_suspect_yolo_candidate(frame_bytes, query, ts_req)
@@ -341,14 +341,16 @@ class WeDetectYoloPipeline:
             raise RuntimeError("failed to decode frame bytes")
         return frame
 
-    def _select_box(self, results) -> tuple[BBox, float, int | None] | None:
+    def _select_box(self, results, query: str) -> tuple[BBox, float, int | None] | None:
         self.last_yolo_reject_reason = ""
         if not results:
             return None
-        boxes = getattr(results[0], "boxes", None)
+        result = results[0]
+        boxes = getattr(result, "boxes", None)
         if boxes is None or boxes.xyxy is None:
             return None
         candidates = []
+        class_ids = boxes.cls.cpu().tolist() if getattr(boxes, "cls", None) is not None else []
         for index, xyxy in enumerate(boxes.xyxy.cpu().tolist()):
             confidence = float(boxes.conf[index].cpu().item()) if boxes.conf is not None else 0.0
             track_id = None
@@ -357,17 +359,24 @@ class WeDetectYoloPipeline:
                 if raw_track_id is not None:
                     track_id = int(raw_track_id)
             bbox = BBox(*map(float, xyxy))
-            candidates.append((bbox, confidence, track_id))
+            class_id = int(class_ids[index]) if index < len(class_ids) else None
+            class_name = self._class_name(result, class_id)
+            candidates.append((bbox, confidence, track_id, class_name))
         if not candidates:
             return None
 
         valid_candidates = []
         rejection_reasons = []
         for candidate in candidates:
-            bbox, confidence, track_id = candidate
+            bbox, confidence, track_id, class_name = candidate
+            if class_name and not query_matches_class(query, class_name):
+                rejection_reasons.append(
+                    f"YOLO candidate class {class_name!r} does not match query"
+                )
+                continue
             reason = self._candidate_rejection_reason(bbox, confidence, track_id)
             if reason is None:
-                valid_candidates.append(candidate)
+                valid_candidates.append((bbox, confidence, track_id))
             else:
                 rejection_reasons.append(reason)
 
@@ -380,6 +389,16 @@ class WeDetectYoloPipeline:
                 if candidate[2] == self.locked_track_id:
                     return candidate
         return min(valid_candidates, key=lambda item: _center_distance(item[0], self.locked_bbox))
+
+    def _class_name(self, result, class_id: int | None) -> str:
+        if class_id is None:
+            return ""
+        names = getattr(result, "names", None) or getattr(self.yolo, "names", None)
+        if isinstance(names, dict):
+            return str(names.get(class_id, ""))
+        if isinstance(names, (list, tuple)) and 0 <= class_id < len(names):
+            return str(names[class_id])
+        return ""
 
     def _handle_yolo_loss(
         self,

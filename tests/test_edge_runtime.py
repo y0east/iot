@@ -4,7 +4,7 @@ import unittest
 from iot_servo_tracker.common.config import AppConfig, SafetyConfig, ScanConfig
 from iot_servo_tracker.common.packets import BBox, CommandPacket, CommandType, SensorSample, TrackingResult
 from iot_servo_tracker.common.timebase import now_us
-from iot_servo_tracker.control.states import SystemState
+from iot_servo_tracker.control.states import Event, SystemState
 from iot_servo_tracker.edge.runtime import EdgeRuntime
 
 
@@ -163,6 +163,17 @@ class EdgeRuntimeTests(unittest.TestCase):
         self.assertTrue(status.ack)
         self.assertTrue(runtime.consume_redetect_request())
         self.assertFalse(runtime.consume_redetect_request())
+
+    def test_centering_state_does_not_keep_requesting_vision_frames(self) -> None:
+        runtime = EdgeRuntime(AppConfig())
+        runtime.handle_command(CommandPacket.create(CommandType.TRACK, query="smartphone"))
+        runtime.state_machine.apply(Event.SCAN_FAILED)
+
+        query, redetect = runtime.next_frame_request()
+
+        self.assertEqual(runtime.state, SystemState.CENTERING)
+        self.assertEqual(query, "")
+        self.assertFalse(redetect)
 
     def test_safe_hold_times_out_to_centering(self) -> None:
         config = AppConfig(

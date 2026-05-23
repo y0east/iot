@@ -131,7 +131,15 @@ class EdgeRuntime:
 
     def next_frame_request(self) -> tuple[str, bool]:
         with self._lock:
-            if not self.current_query:
+            vision_states = {
+                SystemState.SCAN,
+                SystemState.DELAY_COMPENSATION,
+                SystemState.TRACKING,
+                SystemState.SAFE_HOLD,
+                SystemState.LIMITED_RESCAN,
+            }
+            if not self.current_query or self.state not in vision_states:
+                self.redetect_requested = False
                 return "", False
             requested = self.redetect_requested
             self.redetect_requested = False

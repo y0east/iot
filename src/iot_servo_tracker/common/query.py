@@ -23,9 +23,17 @@ _FILLER_WORDS = {
 }
 
 _ALIASES = {
+    "android": "phone",
+    "cell": "phone",
+    "cellphone": "phone",
+    "iphone": "phone",
+    "mobile": "phone",
+    "phone": "phone",
     "person": "person",
     "persons": "person",
     "people": "person",
+    "smartphone": "phone",
+    "telephone": "phone",
     "human": "person",
     "humans": "person",
     "man": "person",

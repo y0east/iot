@@ -48,16 +48,20 @@ class FakeBoxes:
         self.conf = TensorItems([candidate[1] for candidate in candidates])
         track_ids = [candidate[2] for candidate in candidates]
         self.id = None if all(track_id is None for track_id in track_ids) else TensorItems(track_ids)
+        class_ids = [candidate[3] if len(candidate) > 3 else None for candidate in candidates]
+        self.cls = None if all(class_id is None for class_id in class_ids) else TensorList(class_ids)
 
 
 class FakeResult:
-    def __init__(self, candidates):
+    def __init__(self, candidates, names=None):
         self.boxes = FakeBoxes(candidates)
+        self.names = names
 
 
 class FakeYolo:
-    def __init__(self, results):
+    def __init__(self, results, names=None):
         self.results = results
+        self.names = names
 
     def track(self, *args, **kwargs):
         return self.results
@@ -336,6 +340,29 @@ class VisionRuntimeTests(unittest.TestCase):
 
         self.assertEqual(result.bbox, BBox(336, 220, 376, 260))
         self.assertEqual(pipeline.locked_track_id, 8)
+        self.assertEqual(pipeline.wedetect_client.calls, 0)
+
+    def test_rejects_yolo_class_that_does_not_match_query(self) -> None:
+        names = {0: "person", 67: "cell phone"}
+        yolo = FakeYolo([FakeResult([([305, 222, 345, 262], 0.99, 7, 0)], names=names)])
+        redetect = EmptyRedetectClient()
+        pipeline = build_test_pipeline(yolo, redetect)
+
+        result = pipeline.process_frame(ts_req=10, query="smartphone", frame_bytes=b"jpeg")
+
+        self.assertIsNone(result.bbox)
+        self.assertEqual(redetect.calls, 1)
+        self.assertIn("does not match query", pipeline.last_yolo_reject_reason)
+
+    def test_accepts_cell_phone_class_for_smartphone_query(self) -> None:
+        names = {0: "person", 67: "cell phone"}
+        yolo = FakeYolo([FakeResult([([305, 222, 345, 262], 0.99, 7, 67)], names=names)])
+        pipeline = build_test_pipeline(yolo)
+
+        result = pipeline.process_frame(ts_req=10, query="smartphone", frame_bytes=b"jpeg")
+
+        self.assertEqual(result.bbox, BBox(305, 222, 345, 262))
+        self.assertEqual(pipeline.locked_track_id, 7)
         self.assertEqual(pipeline.wedetect_client.calls, 0)
 
     def test_rejected_redetect_candidate_is_not_accepted_next_frame_as_new_lock(self) -> None:
