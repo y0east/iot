@@ -13,13 +13,44 @@ def sensor_sample() -> SensorSample:
 
 
 class EdgeRuntimeTests(unittest.TestCase):
-    def test_track_command_is_rejected_while_not_idle(self) -> None:
+    def test_track_command_restarts_while_not_idle(self) -> None:
         runtime = EdgeRuntime(AppConfig())
         first = runtime.handle_command(CommandPacket.create(CommandType.TRACK, query="red cup"))
+        runtime.last_valid_result = TrackingResult(
+            packet="tracking_result",
+            ts_req=1,
+            ts_resp=2,
+            bbox=BBox(300, 220, 340, 260),
+            confidence=0.9,
+            track_id=7,
+            query="red cup",
+        )
+        runtime.validator.evaluate(BBox(300, 220, 340, 260), sensor_sample())
+        runtime.detections.append(runtime.last_valid_result)
+        runtime.safe_hold_started_us = now_us()
+
         second = runtime.handle_command(CommandPacket.create(CommandType.TRACK, query="blue cup"))
+
         self.assertTrue(first.ack)
-        self.assertFalse(second.ack)
-        self.assertEqual(runtime.current_query, "red cup")
+        self.assertTrue(second.ack)
+        self.assertEqual(runtime.current_query, "blue cup")
+        self.assertEqual(runtime.state, SystemState.SCAN)
+        self.assertIsNone(runtime.last_valid_result)
+        self.assertIsNone(runtime.validator.prev_bbox)
+        self.assertIsNone(runtime.safe_hold_started_us)
+        self.assertEqual(len(runtime.detections.results), 0)
+        query, redetect = runtime.next_frame_request()
+        self.assertEqual(query, "blue cup")
+        self.assertTrue(redetect)
+
+    def test_track_command_is_rejected_in_error_state(self) -> None:
+        runtime = EdgeRuntime(AppConfig())
+        runtime.state_machine.state = SystemState.ERROR
+
+        status = runtime.handle_command(CommandPacket.create(CommandType.TRACK, query="blue cup"))
+
+        self.assertFalse(status.ack)
+        self.assertEqual(runtime.state, SystemState.ERROR)
 
     def test_replayed_command_id_is_ignored_after_current_command_changes(self) -> None:
         runtime = EdgeRuntime(AppConfig())
@@ -110,6 +141,28 @@ class EdgeRuntimeTests(unittest.TestCase):
         self.assertFalse(status.ack)
         self.assertEqual(status.message, "stale tracking result ignored")
         self.assertEqual(runtime.servo.applied_count, applied_count)
+
+    def test_previous_query_result_is_ignored_after_restart(self) -> None:
+        runtime = EdgeRuntime(AppConfig())
+        runtime.handle_command(CommandPacket.create(CommandType.TRACK, query="red cup"))
+        runtime.handle_command(CommandPacket.create(CommandType.TRACK, query="blue cup"))
+
+        status = runtime.handle_tracking_result(
+            TrackingResult(
+                packet="tracking_result",
+                ts_req=now_us(),
+                ts_resp=now_us(),
+                bbox=BBox(300, 220, 340, 260),
+                confidence=0.9,
+                track_id=7,
+                query="red cup",
+            ),
+            sensor_sample(),
+        )
+
+        self.assertFalse(status.ack)
+        self.assertEqual(status.message, "tracking result query does not match current target")
+        self.assertEqual(runtime.state, SystemState.SCAN)
 
     def test_rtt_uses_edge_receive_time_not_server_response_clock(self) -> None:
         runtime = EdgeRuntime(AppConfig())

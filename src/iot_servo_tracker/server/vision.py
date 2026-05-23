@@ -269,6 +269,7 @@ class WeDetectYoloPipeline:
         self.yolo_lost_count = 0
         self.yolo_suspect_count = 0
         self.last_yolo_reject_reason = ""
+        self.active_query = ""
 
     def process_frame(
         self,
@@ -278,6 +279,7 @@ class WeDetectYoloPipeline:
         frame_index: int = 0,
     ) -> TrackingResult:
         del frame_index
+        self._prepare_query(query)
         if self.locked_bbox is None:
             result = self.wedetect_client.detect(frame_bytes, query, ts_req)
             if result.bbox is not None and result.confidence >= self.confidence_threshold:
@@ -327,12 +329,42 @@ class WeDetectYoloPipeline:
         )
 
     def redetect(self, frame_bytes: bytes, query: str, ts_req: int) -> TrackingResult:
-        self.redetect_reference_bbox = self.locked_bbox
+        if self.active_query and query != self.active_query:
+            self._reset_tracking_session(query)
+        else:
+            self.active_query = query
+            self.redetect_reference_bbox = self.locked_bbox
+            self.locked_bbox = None
+            self.locked_track_id = None
+            self.yolo_lost_count = 0
+            self.yolo_suspect_count = 0
+        return self.process_frame(ts_req=ts_req, query=query, frame_bytes=frame_bytes)
+
+    def _prepare_query(self, query: str) -> None:
+        if not self.active_query:
+            self.active_query = query
+        elif query != self.active_query:
+            self._reset_tracking_session(query)
+
+    def _reset_tracking_session(self, query: str) -> None:
+        self.active_query = query
         self.locked_bbox = None
         self.locked_track_id = None
+        self.redetect_reference_bbox = None
         self.yolo_lost_count = 0
         self.yolo_suspect_count = 0
-        return self.process_frame(ts_req=ts_req, query=query, frame_bytes=frame_bytes)
+        self.last_yolo_reject_reason = ""
+        self._reset_yolo_tracker()
+
+    def _reset_yolo_tracker(self) -> None:
+        predictor = getattr(self.yolo, "predictor", None)
+        trackers = getattr(predictor, "trackers", None)
+        if not trackers:
+            return
+        for tracker in trackers:
+            reset = getattr(tracker, "reset", None)
+            if callable(reset):
+                reset()
 
     def _decode_frame(self, frame_bytes: bytes):
         array = self.np.frombuffer(frame_bytes, dtype=self.np.uint8)

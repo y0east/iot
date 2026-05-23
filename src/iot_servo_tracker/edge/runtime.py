@@ -81,7 +81,7 @@ class EdgeRuntime:
         self._remember_command(command.cmd_id)
 
         if command.cmd_type == CommandType.TRACK:
-            if self.state != SystemState.IDLE:
+            if self.state == SystemState.ERROR:
                 return self._status(
                     f"TRACK rejected while state is {self.state.value}",
                     ack=False,
@@ -90,6 +90,7 @@ class EdgeRuntime:
             self.current_cmd_id = command.cmd_id
             self.current_query = command.query
             self.controller.set_max_speed_limit(command.max_speed_deg_s)
+            self._reset_tracking_session()
             self._begin_scan(command.scan_range_deg)
             self.state_machine.apply(Event.TRACK_COMMAND)
         elif command.cmd_type == CommandType.STOP:
@@ -170,6 +171,13 @@ class EdgeRuntime:
         sensor_sample = sensor_sample or SensorSample.empty()
         received_ts_us = received_ts_us or now_us()
         rtt_ms = max((received_ts_us - result.ts_req) / 1_000.0, 0.0)
+        if self.current_query and result.query != self.current_query:
+            return self._status(
+                "tracking result query does not match current target",
+                rtt_ms=rtt_ms,
+                confidence=result.confidence,
+                ack=False,
+            )
         if self.last_result_ts_req and result.ts_req <= self.last_result_ts_req:
             return self._status(
                 "stale tracking result ignored",
@@ -311,6 +319,16 @@ class EdgeRuntime:
             self.processed_cmd_ids.discard(expired)
         self.processed_cmd_id_order.append(cmd_id)
         self.processed_cmd_ids.add(cmd_id)
+
+    def _reset_tracking_session(self) -> None:
+        self.validator = SensorValidator(self.config.safety, self.config.camera)
+        self.detections = DetectionHistory()
+        self.last_valid_result = None
+        self.last_loss_velocity_px_s = 0.0
+        self.last_result_ts_req = 0
+        self.safe_hold_started_us = None
+        self.limited_rescan_center_deg = 0.0
+        self.redetect_requested = False
 
     def _begin_scan(self, scan_range_deg: float) -> None:
         limit = min(abs(scan_range_deg), self.config.scan.range_deg)

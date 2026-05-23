@@ -33,12 +33,10 @@ class StateMachine:
             return SystemState.CENTERING, "operator requested stop or center"
         if event == Event.CALIBRATION_ERROR:
             return SystemState.ERROR, "calibration or limit switch error"
+        if event == Event.TRACK_COMMAND and state != SystemState.ERROR:
+            return SystemState.SCAN, "tracking command accepted"
 
         table: dict[tuple[SystemState, Event], tuple[SystemState, str]] = {
-            (SystemState.IDLE, Event.TRACK_COMMAND): (
-                SystemState.SCAN,
-                "tracking command accepted",
-            ),
             (SystemState.SCAN, Event.DETECTION_LOCKED): (
                 SystemState.DELAY_COMPENSATION,
                 "initial target locked",

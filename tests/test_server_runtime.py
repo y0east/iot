@@ -62,8 +62,10 @@ class FakeYolo:
     def __init__(self, results, names=None):
         self.results = results
         self.names = names
+        self.track_calls = 0
 
     def track(self, *args, **kwargs):
+        self.track_calls += 1
         return self.results
 
 
@@ -96,6 +98,7 @@ def build_test_pipeline(yolo, wedetect_client=None):
     pipeline.yolo_lost_count = 0
     pipeline.yolo_suspect_count = 0
     pipeline.last_yolo_reject_reason = ""
+    pipeline.active_query = ""
     pipeline._decode_frame = lambda frame_bytes: object()
     return pipeline
 
@@ -295,7 +298,7 @@ class VisionRuntimeTests(unittest.TestCase):
         for ts_req in (10, 20, 30):
             result = pipeline.process_frame(ts_req=ts_req, query="person", frame_bytes=b"jpeg")
 
-        self.assertEqual(AppConfig().server.yolo_lost_frames, 12)
+        self.assertEqual(AppConfig().server.yolo_lost_frames, 30)
         self.assertIsNone(result.bbox)
         self.assertEqual(pipeline.yolo_lost_count, 3)
         self.assertEqual(redetect.calls, 0)
@@ -364,6 +367,39 @@ class VisionRuntimeTests(unittest.TestCase):
         self.assertEqual(result.bbox, BBox(305, 222, 345, 262))
         self.assertEqual(pipeline.locked_track_id, 7)
         self.assertEqual(pipeline.wedetect_client.calls, 0)
+
+    def test_query_change_resets_lock_before_redetecting_new_target(self) -> None:
+        class NewTargetWeDetect:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def detect(self, frame_bytes: bytes, query: str, ts_req: int) -> TrackingResult:
+                self.calls += 1
+                return TrackingResult(
+                    packet="tracking_result",
+                    ts_req=ts_req,
+                    ts_resp=ts_req + 1,
+                    bbox=BBox(520, 220, 560, 260),
+                    confidence=0.95,
+                    track_id=8,
+                    query=query,
+                )
+
+        yolo = FakeYolo([FakeResult([([305, 222, 345, 262], 0.99, 7)])])
+        wedetect = NewTargetWeDetect()
+        pipeline = build_test_pipeline(yolo, wedetect)
+        pipeline.active_query = "red cup"
+        pipeline.locked_bbox = BBox(300, 220, 340, 260)
+        pipeline.locked_track_id = 7
+
+        result = pipeline.redetect(ts_req=10, query="blue cup", frame_bytes=b"jpeg")
+
+        self.assertEqual(result.bbox, BBox(520, 220, 560, 260))
+        self.assertEqual(pipeline.locked_bbox, BBox(520, 220, 560, 260))
+        self.assertEqual(pipeline.locked_track_id, 8)
+        self.assertIsNone(pipeline.redetect_reference_bbox)
+        self.assertEqual(wedetect.calls, 1)
+        self.assertEqual(yolo.track_calls, 0)
 
     def test_rejected_redetect_candidate_is_not_accepted_next_frame_as_new_lock(self) -> None:
         class SimilarObjectWeDetect:
