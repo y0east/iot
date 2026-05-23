@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from collections import deque
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Iterable
 
 from iot_servo_tracker.common.config import AppConfig, load_config
@@ -28,8 +29,9 @@ from iot_servo_tracker.comms.zmq_socket import MultipartFrame
 from iot_servo_tracker.control.servo import SimulatedServoDriver
 from iot_servo_tracker.edge.camera import OpenCvCamera, SimulatedCamera
 from iot_servo_tracker.edge.runtime import EdgeRuntime
-from iot_servo_tracker.server.main import process_frame_safely
+from iot_servo_tracker.server.main import preflight_production, process_frame_safely
 from iot_servo_tracker.server.runtime import VisionRuntime
+from iot_servo_tracker.server.vision import WeDetectYoloPipeline, build_wedetect_client
 from iot_servo_tracker.sim.offline import ScriptedSensorReader, ScriptedVisionPipeline
 
 
@@ -54,6 +56,13 @@ class FullStackSimulationOptions:
     jsonl: bool = False
     webcam: bool = False
     camera_index: int = 0
+    production: bool = False
+    preflight_production: bool = True
+    wedetect_ref_module: str | None = None
+    wedetect_ref_script: str | None = None
+    wedetect_repo: str | None = None
+    yolo_model: str | None = None
+    tracker: str | None = None
 
 
 @dataclass(frozen=True)
@@ -66,6 +75,7 @@ class FullStackEvent:
     query: str
     redetect: bool
     frame_source: str
+    vision_mode: str
     frame_sent: bool
     vision_processed: bool
     bbox: tuple[float, float, float, float] | None
@@ -245,14 +255,7 @@ def run_full_stack_simulation(
         spike_start=options.sensor_spike_start,
         spike_steps=options.sensor_spike_steps,
     )
-    vision = VisionRuntime(
-        config,
-        pipeline=ScriptedVisionPipeline(
-            config.camera,
-            lost_start=options.lost_start,
-            lost_steps=options.lost_steps,
-        ),
-    )
+    vision = VisionRuntime(config, pipeline=_build_vision_pipeline(config, options))
 
     events: list[FullStackEvent] = []
     frame_index = 0
@@ -313,6 +316,7 @@ def run_full_stack_simulation(
                     query=query or web.target,
                     redetect=redetect,
                     frame_source=frame_source,
+                    vision_mode="production" if options.production else "scripted",
                     frame_sent=frame_sent,
                     vision_processed=vision_processed,
                     bbox=_bbox_tuple(result.bbox if result is not None else None),
@@ -332,7 +336,8 @@ def run_full_stack_simulation(
 
 
 def main(argv: list[str] | None = None) -> None:
-    args = _build_parser().parse_args(argv)
+    parser = _build_parser()
+    args = parser.parse_args(argv)
     options = FullStackSimulationOptions(
         query=args.query,
         steps=args.steps,
@@ -350,8 +355,18 @@ def main(argv: list[str] | None = None) -> None:
         jsonl=args.jsonl,
         webcam=args.webcam,
         camera_index=args.camera_index,
+        production=args.production,
+        preflight_production=not args.skip_preflight,
+        wedetect_ref_module=args.wedetect_ref_module,
+        wedetect_ref_script=args.wedetect_ref_script,
+        wedetect_repo=args.wedetect_repo,
+        yolo_model=args.yolo_model,
+        tracker=args.tracker,
     )
-    events = run_full_stack_simulation(load_config(args.config), options)
+    try:
+        events = run_full_stack_simulation(load_config(args.config), options)
+    except RuntimeError as exc:
+        parser.error(str(exc))
     _print_events(events, options)
 
 
@@ -398,6 +413,21 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Capture real webcam JPEG frames instead of generated frame bytes",
     )
     parser.add_argument("--camera-index", type=int, default=0)
+    parser.add_argument(
+        "--production",
+        action="store_true",
+        help="Use the real WeDetect + YOLO pipeline instead of scripted boxes",
+    )
+    parser.add_argument(
+        "--skip-preflight",
+        action="store_true",
+        help="Skip production WeDetect artifact/module preflight",
+    )
+    parser.add_argument("--wedetect-ref-module", default=None)
+    parser.add_argument("--wedetect-ref-script", default=None)
+    parser.add_argument("--wedetect-repo", default=None)
+    parser.add_argument("--yolo-model", default=None)
+    parser.add_argument("--tracker", default=None)
     return parser
 
 
@@ -431,6 +461,10 @@ def _set_if_default(data: dict, key: str, value) -> None:
 
 
 def _build_camera(config: AppConfig, options: FullStackSimulationOptions):
+    if options.production and not options.webcam:
+        raise RuntimeError(
+            "--production requires --webcam so real JPEG frames reach WeDetect/YOLO"
+        )
     if options.webcam:
         return (
             OpenCvCamera(
@@ -441,6 +475,45 @@ def _build_camera(config: AppConfig, options: FullStackSimulationOptions):
             f"webcam:{options.camera_index}",
         )
     return SimulatedCamera(payload=b"simulated-webcam-frame"), "simulated-webcam"
+
+
+def _build_vision_pipeline(config: AppConfig, options: FullStackSimulationOptions):
+    if not options.production:
+        return ScriptedVisionPipeline(
+            config.camera,
+            lost_start=options.lost_start,
+            lost_steps=options.lost_steps,
+        )
+
+    server = config.server
+    if options.wedetect_repo:
+        os.environ["WEDETECT_REPO"] = options.wedetect_repo
+    if options.wedetect_ref_module is not None:
+        server = replace(server, wedetect_ref_module=options.wedetect_ref_module)
+    if options.wedetect_ref_script is not None:
+        server = replace(server, wedetect_ref_script=options.wedetect_ref_script)
+    if options.yolo_model is not None:
+        server = replace(server, yolo_model=options.yolo_model)
+    if options.tracker is not None:
+        server = replace(server, tracker=options.tracker)
+
+    wedetect_client = build_wedetect_client(server)
+    if options.preflight_production:
+        preflight_production(wedetect_client)
+    return WeDetectYoloPipeline(
+        wedetect_client=wedetect_client,
+        yolo_model=server.yolo_model,
+        tracker=server.tracker,
+        confidence_threshold=server.confidence_threshold,
+        yolo_lost_frames=server.yolo_lost_frames,
+        yolo_suspect_frames=server.yolo_suspect_frames,
+        yolo_max_center_jump_px=server.yolo_max_center_jump_px,
+        yolo_max_area_growth_ratio=server.yolo_max_area_growth_ratio,
+        yolo_max_frame_area_ratio=server.yolo_max_frame_area_ratio,
+        yolo_max_aspect_ratio_change=server.yolo_max_aspect_ratio_change,
+        yolo_min_iou_on_id_change=server.yolo_min_iou_on_id_change,
+        camera=config.camera,
+    )
 
 
 def _web_view_state(status: StatusAck | None) -> str:
@@ -476,7 +549,8 @@ def _print_events(
             print(
                 f"{event.step:04d} WEB={event.web_view:<10} EDGE={event.edge_state:<18} "
                 f"target={event.web_target!r:<14} query={event.query!r:<14} "
-                f"bbox={bbox:<23} frame={str(event.frame_sent):<5} "
+                f"bbox={bbox:<23} mode={event.vision_mode:<10} "
+                f"frame={str(event.frame_sent):<5} "
                 f"vision={str(event.vision_processed):<5} mqtt={event.mqtt_commands}/"
                 f"{event.mqtt_statuses} pan={event.pan_deg:7.2f} "
                 f"tilt={event.tilt_deg:7.2f} {event.message}{command}"

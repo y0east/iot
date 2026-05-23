@@ -269,6 +269,7 @@ class WeDetectYoloPipeline:
         self.yolo_lost_count = 0
         self.yolo_suspect_count = 0
         self.last_yolo_reject_reason = ""
+        self.last_inference_source = ""
         self.active_query = ""
 
     def process_frame(
@@ -281,6 +282,7 @@ class WeDetectYoloPipeline:
         del frame_index
         self._prepare_query(query)
         if self.locked_bbox is None:
+            self.last_inference_source = "wedetect"
             result = self.wedetect_client.detect(frame_bytes, query, ts_req)
             if result.bbox is not None and result.confidence >= self.confidence_threshold:
                 if self.redetect_reference_bbox is not None:
@@ -301,6 +303,7 @@ class WeDetectYoloPipeline:
             return result
 
         frame = self._decode_frame(frame_bytes)
+        self.last_inference_source = "yolo"
         results = self.yolo.track(
             frame,
             persist=True,
@@ -354,6 +357,7 @@ class WeDetectYoloPipeline:
         self.yolo_lost_count = 0
         self.yolo_suspect_count = 0
         self.last_yolo_reject_reason = ""
+        self.last_inference_source = ""
         self._reset_yolo_tracker()
 
     def _reset_yolo_tracker(self) -> None:
@@ -463,6 +467,7 @@ class WeDetectYoloPipeline:
         ts_req: int,
     ) -> TrackingResult:
         previous_bbox = self.locked_bbox
+        self.last_inference_source = "wedetect"
         self.locked_bbox = None
         self.locked_track_id = None
         result = self.wedetect_client.detect(frame_bytes, query, ts_req)
