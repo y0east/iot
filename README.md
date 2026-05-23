@@ -45,9 +45,12 @@ python3 scripts/simulate_control_loop.py --scenario normal --steps 80
 python3 scripts/simulate_control_loop.py --scenario lost --steps 70
 python3 scripts/simulate_control_loop.py --scenario retarget --steps 80
 python3 scripts/simulate_control_loop.py --scenario sensor --steps 70
+python3 scripts/simulate_full_stack.py --scenario retarget --steps 80
 ```
 
 `scripts/simulate_control_loop.py`는 Raspberry Pi, PCA9685, 거리센서, 카메라, MQTT/ZMQ 없이 `EdgeRuntime` 상태머신과 서보 제어 흐름을 로컬에서 재현합니다. `lost`는 bbox 상실 후 안전대기 진입, `retarget`은 상실 상태에서 새 TRACK 명령으로 다른 물체를 다시 스캔하는 흐름, `sensor`는 초음파 거리 급락으로 안전대기 진입을 확인합니다. 자동 분석이 필요하면 `--jsonl`을 붙여 프레임별 이벤트를 JSON Lines로 출력할 수 있습니다.
+
+`scripts/simulate_full_stack.py`는 Streamlit 버튼 클릭에 해당하는 웹 명령부터 in-memory MQTT, 엣지 런타임, in-memory ZMQ multipart 프레임 전달, 비전 서버 처리, MQTT 상태 수신, 웹 표시 상태까지 한 프로세스에서 재현합니다. 출력의 `WEB=DETECTING`/`WEB=TRACKING`은 웹 화면이 마지막 상태 패킷을 받았을 때 보여줄 상태입니다. 기본은 가상 웹캠 프레임을 사용하고, 로컬 PC 웹캠 프레임을 통신 경로에 태우려면 `--webcam --camera-index 0`을 붙입니다.
 
 패키지 형태로 설치해서 실행하려면:
 
@@ -62,6 +65,7 @@ iot-simulate
 
 ```bash
 streamlit run src/iot_servo_tracker/web/app.py
+streamlit run src/iot_servo_tracker/web/sim_app.py
 ```
 
 ## 실제 프로세스 실행
