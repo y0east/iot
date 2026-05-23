@@ -117,7 +117,8 @@ The server separates three YOLO failure modes:
    WeDetect to redetect the target.
 2. Similar-object switch: YOLO returns a bbox, often with high confidence, but
    its center jumps too far from the WeDetect-locked target or its tracker id
-   changes without enough IoU overlap. The server counts this with
+   changes without enough IoU overlap. A short tracker id change is still accepted
+   when the bbox stays spatially stable in center and area. Otherwise, the server counts this with
    `yolo_suspect_frames` and never sends that suspicious bbox to the edge servo
    controller.
 3. Large-background absorption: YOLO returns a high-confidence bbox that has
@@ -152,7 +153,7 @@ wedetect_uni_checkpoint = ""
 wedetect_ref_module = "my_wedetect_ref_runtime:detect"
 wedetect_ref_script = ""
 wedetect_device = "cuda:0"
-yolo_lost_frames = 3
+yolo_lost_frames = 12
 yolo_suspect_frames = 2
 yolo_max_center_jump_px = 120.0
 yolo_max_area_growth_ratio = 4.0

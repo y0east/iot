@@ -18,6 +18,10 @@ class StateMachineTests(unittest.TestCase):
         machine = StateMachine(SystemState.TRACKING)
         self.assertEqual(machine.apply(Event.STOP_COMMAND).current, SystemState.CENTERING)
 
+    def test_track_command_restarts_from_safe_hold(self) -> None:
+        machine = StateMachine(SystemState.SAFE_HOLD)
+        self.assertEqual(machine.apply(Event.TRACK_COMMAND).current, SystemState.SCAN)
+
 
 if __name__ == "__main__":
     unittest.main()

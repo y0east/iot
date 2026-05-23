@@ -44,7 +44,8 @@ dev = ["ruff>=0.4"]
 [project.scripts]
 iot-edge = "iot_servo_tracker.edge.main:main"
 iot-server = "iot_servo_tracker.server.main:main"
-iot-simulate = "iot_servo_tracker.edge.main:simulate"
+iot-simulate = "iot_servo_tracker.sim.offline:main"
+iot-simulate-full-stack = "iot_servo_tracker.sim.full_stack:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

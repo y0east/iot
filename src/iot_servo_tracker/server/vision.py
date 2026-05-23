@@ -14,6 +14,7 @@ from typing import Any, Protocol
 
 from iot_servo_tracker.common.config import CameraConfig, ServerConfig
 from iot_servo_tracker.common.packets import BBox, TrackingResult
+from iot_servo_tracker.common.query import canonical_detection_query, query_matches_class
 from iot_servo_tracker.common.timebase import now_us
 
 
@@ -84,23 +85,26 @@ class HuggingFaceWeDetectRefClient:
     timeout_s: float = 30.0
 
     def detect(self, frame_bytes: bytes, query: str, ts_req: int) -> TrackingResult:
+        model_query = canonical_detection_query(query)
         ref_model_dir, uni_checkpoint = self.resolve_artifacts()
         if self.module:
-            return self._detect_with_module(
+            result = self._detect_with_module(
                 frame_bytes,
-                query,
+                model_query,
                 ts_req,
                 ref_model_dir,
                 uni_checkpoint,
             )
+            return _with_query(result, query)
         if self.script:
-            return self._detect_with_script(
+            result = self._detect_with_script(
                 frame_bytes,
-                query,
+                model_query,
                 ts_req,
                 ref_model_dir,
                 uni_checkpoint,
             )
+            return _with_query(result, query)
         raise RuntimeError(
             "WeDetect-Ref requires wedetect_ref_module or wedetect_ref_script after "
             "downloading Hugging Face artifacts"
@@ -228,7 +232,7 @@ class WeDetectYoloPipeline:
         yolo_model: str = "yolo26n.pt",
         tracker: str = "bytetrack.yaml",
         confidence_threshold: float = 0.25,
-        yolo_lost_frames: int = 3,
+        yolo_lost_frames: int = 12,
         yolo_suspect_frames: int = 2,
         yolo_max_center_jump_px: float = 120.0,
         yolo_max_area_growth_ratio: float = 4.0,
@@ -265,6 +269,8 @@ class WeDetectYoloPipeline:
         self.yolo_lost_count = 0
         self.yolo_suspect_count = 0
         self.last_yolo_reject_reason = ""
+        self.last_inference_source = ""
+        self.active_query = ""
 
     def process_frame(
         self,
@@ -274,7 +280,9 @@ class WeDetectYoloPipeline:
         frame_index: int = 0,
     ) -> TrackingResult:
         del frame_index
+        self._prepare_query(query)
         if self.locked_bbox is None:
+            self.last_inference_source = "wedetect"
             result = self.wedetect_client.detect(frame_bytes, query, ts_req)
             if result.bbox is not None and result.confidence >= self.confidence_threshold:
                 if self.redetect_reference_bbox is not None:
@@ -295,6 +303,7 @@ class WeDetectYoloPipeline:
             return result
 
         frame = self._decode_frame(frame_bytes)
+        self.last_inference_source = "yolo"
         results = self.yolo.track(
             frame,
             persist=True,
@@ -302,7 +311,7 @@ class WeDetectYoloPipeline:
             conf=self.confidence_threshold,
             verbose=False,
         )
-        best = self._select_box(results)
+        best = self._select_box(results, query)
         if best is None:
             if self.last_yolo_reject_reason:
                 return self._handle_suspect_yolo_candidate(frame_bytes, query, ts_req)
@@ -323,12 +332,43 @@ class WeDetectYoloPipeline:
         )
 
     def redetect(self, frame_bytes: bytes, query: str, ts_req: int) -> TrackingResult:
-        self.redetect_reference_bbox = self.locked_bbox
+        if self.active_query and query != self.active_query:
+            self._reset_tracking_session(query)
+        else:
+            self.active_query = query
+            self.redetect_reference_bbox = self.locked_bbox
+            self.locked_bbox = None
+            self.locked_track_id = None
+            self.yolo_lost_count = 0
+            self.yolo_suspect_count = 0
+        return self.process_frame(ts_req=ts_req, query=query, frame_bytes=frame_bytes)
+
+    def _prepare_query(self, query: str) -> None:
+        if not self.active_query:
+            self.active_query = query
+        elif query != self.active_query:
+            self._reset_tracking_session(query)
+
+    def _reset_tracking_session(self, query: str) -> None:
+        self.active_query = query
         self.locked_bbox = None
         self.locked_track_id = None
+        self.redetect_reference_bbox = None
         self.yolo_lost_count = 0
         self.yolo_suspect_count = 0
-        return self.process_frame(ts_req=ts_req, query=query, frame_bytes=frame_bytes)
+        self.last_yolo_reject_reason = ""
+        self.last_inference_source = ""
+        self._reset_yolo_tracker()
+
+    def _reset_yolo_tracker(self) -> None:
+        predictor = getattr(self.yolo, "predictor", None)
+        trackers = getattr(predictor, "trackers", None)
+        if not trackers:
+            return
+        for tracker in trackers:
+            reset = getattr(tracker, "reset", None)
+            if callable(reset):
+                reset()
 
     def _decode_frame(self, frame_bytes: bytes):
         array = self.np.frombuffer(frame_bytes, dtype=self.np.uint8)
@@ -337,14 +377,16 @@ class WeDetectYoloPipeline:
             raise RuntimeError("failed to decode frame bytes")
         return frame
 
-    def _select_box(self, results) -> tuple[BBox, float, int | None] | None:
+    def _select_box(self, results, query: str) -> tuple[BBox, float, int | None] | None:
         self.last_yolo_reject_reason = ""
         if not results:
             return None
-        boxes = getattr(results[0], "boxes", None)
+        result = results[0]
+        boxes = getattr(result, "boxes", None)
         if boxes is None or boxes.xyxy is None:
             return None
         candidates = []
+        class_ids = boxes.cls.cpu().tolist() if getattr(boxes, "cls", None) is not None else []
         for index, xyxy in enumerate(boxes.xyxy.cpu().tolist()):
             confidence = float(boxes.conf[index].cpu().item()) if boxes.conf is not None else 0.0
             track_id = None
@@ -353,17 +395,24 @@ class WeDetectYoloPipeline:
                 if raw_track_id is not None:
                     track_id = int(raw_track_id)
             bbox = BBox(*map(float, xyxy))
-            candidates.append((bbox, confidence, track_id))
+            class_id = int(class_ids[index]) if index < len(class_ids) else None
+            class_name = self._class_name(result, class_id)
+            candidates.append((bbox, confidence, track_id, class_name))
         if not candidates:
             return None
 
         valid_candidates = []
         rejection_reasons = []
         for candidate in candidates:
-            bbox, confidence, track_id = candidate
+            bbox, confidence, track_id, class_name = candidate
+            if class_name and not query_matches_class(query, class_name):
+                rejection_reasons.append(
+                    f"YOLO candidate class {class_name!r} does not match query"
+                )
+                continue
             reason = self._candidate_rejection_reason(bbox, confidence, track_id)
             if reason is None:
-                valid_candidates.append(candidate)
+                valid_candidates.append((bbox, confidence, track_id))
             else:
                 rejection_reasons.append(reason)
 
@@ -376,6 +425,16 @@ class WeDetectYoloPipeline:
                 if candidate[2] == self.locked_track_id:
                     return candidate
         return min(valid_candidates, key=lambda item: _center_distance(item[0], self.locked_bbox))
+
+    def _class_name(self, result, class_id: int | None) -> str:
+        if class_id is None:
+            return ""
+        names = getattr(result, "names", None) or getattr(self.yolo, "names", None)
+        if isinstance(names, dict):
+            return str(names.get(class_id, ""))
+        if isinstance(names, (list, tuple)) and 0 <= class_id < len(names):
+            return str(names[class_id])
+        return ""
 
     def _handle_yolo_loss(
         self,
@@ -408,6 +467,7 @@ class WeDetectYoloPipeline:
         ts_req: int,
     ) -> TrackingResult:
         previous_bbox = self.locked_bbox
+        self.last_inference_source = "wedetect"
         self.locked_bbox = None
         self.locked_track_id = None
         result = self.wedetect_client.detect(frame_bytes, query, ts_req)
@@ -460,9 +520,17 @@ class WeDetectYoloPipeline:
             and track_id is not None
             and track_id != self.locked_track_id
             and _iou(bbox, previous) < self.yolo_min_iou_on_id_change
+            and not self._stable_id_change_candidate(bbox, previous)
         ):
             return "YOLO candidate track id changed without enough overlap"
         return None
+
+    def _stable_id_change_candidate(self, bbox: BBox, previous: BBox) -> bool:
+        center_limit = min(self.yolo_max_center_jump_px, 48.0)
+        return (
+            _center_distance(bbox, previous) <= center_limit
+            and _area_ratio_ok(bbox, previous, max_ratio=2.0)
+        )
 
 
 def build_wedetect_client(config: ServerConfig) -> WeDetectClient:
@@ -506,6 +574,20 @@ def _tracking_result_from_payload(
     )
 
 
+def _with_query(result: TrackingResult, query: str) -> TrackingResult:
+    if result.query == query:
+        return result
+    return TrackingResult(
+        packet=result.packet,
+        ts_req=result.ts_req,
+        ts_resp=result.ts_resp,
+        bbox=result.bbox,
+        confidence=result.confidence,
+        track_id=result.track_id,
+        query=query,
+    )
+
+
 def _center_distance(a: BBox, b: BBox | None) -> float:
     if b is None:
         return 0.0
@@ -530,6 +612,13 @@ def _aspect_ratio_change(current: BBox, previous: BBox) -> float:
     current_ratio = current_width / current_height
     previous_ratio = previous_width / previous_height
     return max(current_ratio / previous_ratio, previous_ratio / current_ratio)
+
+
+def _area_ratio_ok(current: BBox, previous: BBox, max_ratio: float) -> bool:
+    if current.area <= 0 or previous.area <= 0:
+        return False
+    ratio = current.area / previous.area
+    return (1.0 / max_ratio) <= ratio <= max_ratio
 
 
 def _iou(a: BBox, b: BBox) -> float:
