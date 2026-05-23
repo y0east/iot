@@ -6,6 +6,8 @@ from iot_servo_tracker.web import live_stack_app
 
 
 class FakeCamera:
+    """Unit-test stand-in only; runtime paths open OpenCvCamera."""
+
     def __init__(self, *args, **kwargs) -> None:
         self.closed = False
 

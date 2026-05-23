@@ -47,6 +47,7 @@ python3 scripts/simulate_control_loop.py --scenario retarget --steps 80
 python3 scripts/simulate_control_loop.py --scenario sensor --steps 70
 python3 scripts/simulate_full_stack.py --scenario retarget --steps 80
 python3 scripts/simulate_full_stack.py --production --webcam --camera-index 0 --query "person"
+python3 scripts/validate_live_webcam_stack.py --camera-index 0 --frames 60 --query "person" --save-last-frame /tmp/iot-live-stack.jpg
 ```
 
 `scripts/simulate_control_loop.py`는 Raspberry Pi, PCA9685, 거리센서, 카메라, MQTT/ZMQ 없이 `EdgeRuntime` 상태머신과 서보 제어 흐름을 로컬에서 재현합니다. `lost`는 bbox 상실 후 안전대기 진입, `retarget`은 상실 상태에서 새 TRACK 명령으로 다른 물체를 다시 스캔하는 흐름, `sensor`는 초음파 거리 급락으로 안전대기 진입을 확인합니다. 자동 분석이 필요하면 `--jsonl`을 붙여 프레임별 이벤트를 JSON Lines로 출력할 수 있습니다.
@@ -67,7 +68,13 @@ streamlit run src/iot_servo_tracker/web/vision_validation_app.py
 streamlit run src/iot_servo_tracker/web/live_stack_app.py
 ```
 
-기본 모드는 모델 없이도 웹캠과 통신/상태 흐름이 실제로 도는 `scripted` 비전입니다. RTX 서버 환경에서 WeDetect adapter, YOLO 모델, CUDA 의존성이 준비되어 있으면 화면에서 `Real WeDetect + YOLO`를 켜서 같은 웹캠/통신 루프를 실제 비전 모델로 검증합니다.
+같은 경로를 터미널에서 실제 웹캠으로 바로 검증하려면 아래 명령을 사용합니다. 이 명령은 fake camera를 쓰지 않고 `OpenCvCamera`로 `--camera-index`의 실제 PC 웹캠을 엽니다. 자동 단위 테스트의 fake camera는 카메라가 없는 환경에서도 통신/상태 루프를 검사하기 위한 테스트 대역일 뿐입니다.
+
+```bash
+python3 scripts/validate_live_webcam_stack.py --camera-index 0 --frames 60 --query "person" --save-last-frame /tmp/iot-live-stack.jpg
+```
+
+기본 모드는 모델 없이도 실제 웹캠 프레임과 통신/상태 흐름이 도는 `scripted` 비전입니다. RTX 서버 환경에서 WeDetect adapter, YOLO 모델, CUDA 의존성이 준비되어 있으면 화면에서 `Real WeDetect + YOLO`를 켜거나 CLI에 `--production`을 붙여 같은 웹캠/통신 루프를 실제 비전 모델로 검증합니다.
 
 패키지 형태로 설치해서 실행하려면:
 
