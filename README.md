@@ -17,7 +17,7 @@
 - Hugging Face에서 내려받는 WeDetect-Ref + WeDetect-Uni 로컬 추론 경계와 Ultralytics YOLO/ByteTrack 계열 production pipeline 경계
 - YOLO 추적 중 대상이 사라지면 빈 결과를 안전대기 조건으로 전달하고, 연속 상실 시 WeDetect 재검출로 재잠금
 - YOLO가 높은 confidence로 유사 물체를 잡거나 큰 배경/사물 bbox로 흡수되는 경우를 중심 이동량, 면적 증가율, 화면 점유율, 종횡비, ID 변경 시 IoU로 차단
-- 실제 하드웨어 없이 동작 확인 가능한 시뮬레이션 드라이버와 단위 테스트
+- 실제 하드웨어 없이 상태머신, 가상 비전, 가상 센서, 서보 명령 흐름을 확인하는 no-Pi 시뮬레이터와 단위 테스트
 
 ## 폴더 구조
 
@@ -32,6 +32,7 @@
 │   ├── control/                # 상태머신, PD 제어, 센서 검증, 서보 드라이버
 │   ├── edge/                   # 라즈베리파이 엣지 런타임
 │   ├── server/                 # 추론 서버 런타임과 비전 파이프라인 경계
+│   ├── simulation/             # 라즈베리파이 없는 데스크톱 시뮬레이션
 │   └── web/                    # Streamlit 웹 제어 화면
 └── tests/                      # 표준 unittest 기반 테스트
 ```
@@ -40,8 +41,19 @@
 
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests
+python3 scripts/simulate_no_pi.py --steps 80
 python3 scripts/simulate_control_loop.py
 ```
+
+라즈베리파이, GPIO, PCA9685, 카메라, MQTT/ZMQ 없이 로컬 제어 루프만 재현하려면 no-Pi 시뮬레이터를 실행합니다.
+
+```bash
+PYTHONPATH=src python3 scripts/simulate_no_pi.py --query "red cup" --steps 120
+PYTHONPATH=src python3 scripts/simulate_no_pi.py --occlude-start 45 --occlude-steps 8
+PYTHONPATH=src python3 scripts/simulate_no_pi.py --sensor-dropout-start 45 --sensor-dropout-steps 4 --jsonl
+```
+
+시뮬레이터는 `EdgeRuntime`, `SimulatedVisionPipeline`, 가상 ToF/초음파 센서, `SimulatedServoDriver`를 사용합니다. 따라서 하드웨어 없이도 `SCAN -> DELAY_COMPENSATION -> TRACKING`, 가림에 따른 `SAFE_HOLD`, 센서 끊김, 리밋스위치 오류 같은 제어 상태를 확인할 수 있습니다.
 
 패키지 형태로 설치해서 실행하려면:
 
@@ -49,6 +61,7 @@ python3 scripts/simulate_control_loop.py
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[web,edge,server,dev]"
+iot-nopi-sim --steps 80
 iot-simulate
 ```
 

@@ -45,6 +45,7 @@ dev = ["ruff>=0.4"]
 iot-edge = "iot_servo_tracker.edge.main:main"
 iot-server = "iot_servo_tracker.server.main:main"
 iot-simulate = "iot_servo_tracker.edge.main:simulate"
+iot-nopi-sim = "iot_servo_tracker.simulation.nopi:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
