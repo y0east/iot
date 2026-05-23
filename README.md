@@ -61,6 +61,14 @@ python3 scripts/simulate_full_stack.py --production --webcam --camera-index 0 --
 streamlit run src/iot_servo_tracker/web/vision_validation_app.py
 ```
 
+라즈베리파이 없이 실제 웹캠 영상과 정의된 통신 흐름까지 함께 검증하려면 라이브 스택 검증 화면을 실행합니다. 이 화면은 웹에서 입력한 대상 문자열을 TRACK 명령으로 만들고, in-memory MQTT로 엣지 런타임에 전달한 뒤, PC 웹캠 JPEG 프레임을 in-memory ZMQ multipart 프레임으로 비전 런타임에 보냅니다. 비전 결과는 다시 ZMQ 결과 패킷으로 엣지에 돌아오고, ToF/초음파 센서값은 화면에서 지정한 근사값으로 넣어 상태머신을 진행합니다. 마지막으로 MQTT 상태 패킷이 웹으로 돌아오며, bbox와 `WEB`/`EDGE`/비전 source가 웹캠 영상 위에 표시됩니다.
+
+```bash
+streamlit run src/iot_servo_tracker/web/live_stack_app.py
+```
+
+기본 모드는 모델 없이도 웹캠과 통신/상태 흐름이 실제로 도는 `scripted` 비전입니다. RTX 서버 환경에서 WeDetect adapter, YOLO 모델, CUDA 의존성이 준비되어 있으면 화면에서 `Real WeDetect + YOLO`를 켜서 같은 웹캠/통신 루프를 실제 비전 모델로 검증합니다.
+
 패키지 형태로 설치해서 실행하려면:
 
 ```bash
@@ -76,6 +84,7 @@ iot-simulate
 streamlit run src/iot_servo_tracker/web/app.py
 streamlit run src/iot_servo_tracker/web/sim_app.py
 streamlit run src/iot_servo_tracker/web/vision_validation_app.py
+streamlit run src/iot_servo_tracker/web/live_stack_app.py
 ```
 
 ## 실제 프로세스 실행
