@@ -32,6 +32,7 @@
 │   ├── control/                # 상태머신, PD 제어, 센서 검증, 서보 드라이버
 │   ├── edge/                   # 라즈베리파이 엣지 런타임
 │   ├── server/                 # 추론 서버 런타임과 비전 파이프라인 경계
+│   ├── sim/                    # 라즈베리파이 없는 오프라인 시뮬레이션
 │   └── web/                    # Streamlit 웹 제어 화면
 └── tests/                      # 표준 unittest 기반 테스트
 ```
@@ -40,8 +41,13 @@
 
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests
-python3 scripts/simulate_control_loop.py
+python3 scripts/simulate_control_loop.py --scenario normal --steps 80
+python3 scripts/simulate_control_loop.py --scenario lost --steps 70
+python3 scripts/simulate_control_loop.py --scenario retarget --steps 80
+python3 scripts/simulate_control_loop.py --scenario sensor --steps 70
 ```
+
+`scripts/simulate_control_loop.py`는 Raspberry Pi, PCA9685, 거리센서, 카메라, MQTT/ZMQ 없이 `EdgeRuntime` 상태머신과 서보 제어 흐름을 로컬에서 재현합니다. `lost`는 bbox 상실 후 안전대기 진입, `retarget`은 상실 상태에서 새 TRACK 명령으로 다른 물체를 다시 스캔하는 흐름, `sensor`는 초음파 거리 급락으로 안전대기 진입을 확인합니다. 자동 분석이 필요하면 `--jsonl`을 붙여 프레임별 이벤트를 JSON Lines로 출력할 수 있습니다.
 
 패키지 형태로 설치해서 실행하려면:
 
@@ -75,16 +81,16 @@ wedetect_uni_checkpoint = ""
 wedetect_ref_module = "my_wedetect_ref_runtime:detect"
 wedetect_ref_script = ""
 wedetect_device = "cuda:0"
-yolo_lost_frames = 12
-yolo_suspect_frames = 2
-yolo_max_center_jump_px = 120.0
-yolo_max_area_growth_ratio = 4.0
-yolo_max_frame_area_ratio = 0.35
-yolo_max_aspect_ratio_change = 3.0
-yolo_min_iou_on_id_change = 0.10
+yolo_lost_frames = 30
+yolo_suspect_frames = 5
+yolo_max_center_jump_px = 320.0
+yolo_max_area_growth_ratio = 16.0
+yolo_max_frame_area_ratio = 0.85
+yolo_max_aspect_ratio_change = 8.0
+yolo_min_iou_on_id_change = 0.0
 ```
 
-`yolo_lost_frames = 12`는 12 FPS 기준 약 1초 분량입니다. 짧은 YOLO/ByteTrack 흔들림에는 빈 결과를 반환하며 기다리고, 연속 상실이 길어질 때만 무거운 WeDetect-Ref 재검출로 넘어갑니다.
+`yolo_lost_frames = 30`는 12 FPS 기준 약 2.5초 분량입니다. 짧은 YOLO/ByteTrack 흔들림에는 빈 결과를 반환하며 기다리고, 연속 상실이 길어질 때만 무거운 WeDetect-Ref 재검출로 넘어갑니다.
 
 `wedetect_ref_module` callable은 `frame_bytes`, `query`, `ts_req`, `wedetect_ref_model_dir`, `wedetect_uni_checkpoint`, `device` 키워드 인자를 받고, `{"bbox": [x1, y1, x2, y2], "confidence": 0.9, "track_id": 1}` 형태의 dict 또는 `TrackingResult`를 반환하면 됩니다. `wedetect_ref_model_dir`와 `wedetect_uni_checkpoint`를 비워두면 `huggingface-hub`가 설정된 repo에서 자동으로 다운로드합니다. 독립 스크립트를 쓰는 경우 `wedetect_ref_script`에 경로를 넣으면 임시 이미지 파일, WeDetect-Ref 경로, WeDetect-Uni 체크포인트, query가 인자로 전달됩니다.
 
