@@ -51,12 +51,15 @@ class EdgeRuntime:
     limited_rescan_center_deg: float = 0.0
     last_valid_result: TrackingResult | None = None
     last_loss_velocity_px_s: float = 0.0
+    recovery_confirm_count: int = 0
     last_result_ts_req: int = 0
     redetect_requested: bool = False
     processed_cmd_ids: set[str] = field(default_factory=set)
     processed_cmd_id_order: deque[str] = field(default_factory=deque)
     last_status: StatusAck = field(default_factory=StatusAck)
     last_command: ServoCommand | None = None
+    is_predicting: bool = False
+    predicted_bbox: BBox | None = None
     _lock: RLock = field(default_factory=RLock, repr=False)
 
     def __post_init__(self) -> None:
@@ -168,6 +171,8 @@ class EdgeRuntime:
         dt_s: float = 0.033,
         received_ts_us: int | None = None,
     ) -> StatusAck:
+        self.is_predicting = False
+        self.predicted_bbox = None
         sensor_sample = sensor_sample or SensorSample.empty()
         received_ts_us = received_ts_us or now_us()
         rtt_ms = max((received_ts_us - result.ts_req) / 1_000.0, 0.0)
@@ -195,6 +200,7 @@ class EdgeRuntime:
         if self.state == SystemState.SCAN:
             if self._scan_candidate_locked(result):
                 self.last_valid_result = result
+                self.controller.reset_history()
                 self.state_machine.apply(Event.DETECTION_LOCKED)
             else:
                 self._control_step_unlocked(dt_s, sensor_sample)
@@ -228,6 +234,15 @@ class EdgeRuntime:
                     query=result.query,
                 )
                 self.state_machine.apply(Event.TRACK_OK)
+            elif validation.category == ValidationCategory.MISSING:
+                predicted = self.detections.predict_trajectory(now_us())
+                if predicted is not None:
+                    command = self.controller.update(predicted, dt_s)
+                    self.servo.apply(command)
+                    self.last_command = command
+                    self.is_predicting = True
+                    self.predicted_bbox = predicted
+                self.state_machine.apply(Event.TRACK_OK)
         elif self.state == SystemState.SAFE_HOLD:
             command = self.controller.soft_stop(dt_s)
             self.servo.apply(command)
@@ -236,21 +251,27 @@ class EdgeRuntime:
                 corrected_bbox is not None
                 and not validation.safe_hold
                 and not entered_safe_hold
-                and result.confidence >= self.config.scan.confidence_threshold
+                and result.confidence >= self.config.server.confidence_threshold
                 and self._is_same_target(result)
             ):
-                self.last_valid_result = result
-                self.safe_hold_started_us = None
-                self.state_machine.apply(Event.RECOVERED)
+                self.recovery_confirm_count += 1
+                if self.recovery_confirm_count >= self.config.safety.recovery_confirm_frames:
+                    self.last_valid_result = result
+                    self.safe_hold_started_us = None
+                    self.recovery_confirm_count = 0
+                    self.controller.reset_history()
+                    self.state_machine.apply(Event.RECOVERED)
             else:
+                self.recovery_confirm_count = 0
                 self._advance_safe_hold(dt_s)
         elif self.state == SystemState.LIMITED_RESCAN:
             if (
                 corrected_bbox is not None
-                and result.confidence >= self.config.scan.confidence_threshold
+                and result.confidence >= self.config.server.confidence_threshold
                 and self._is_same_target(result)
             ):
                 self.last_valid_result = result
+                self.controller.reset_history()
                 self.state_machine.apply(Event.RESCAN_SUCCESS)
                 self.state_machine.apply(Event.SYNC_READY)
             else:
@@ -329,6 +350,9 @@ class EdgeRuntime:
         self.safe_hold_started_us = None
         self.limited_rescan_center_deg = 0.0
         self.redetect_requested = False
+        self.recovery_confirm_count = 0
+        self.is_predicting = False
+        self.predicted_bbox = None
 
     def _begin_scan(self, scan_range_deg: float) -> None:
         limit = min(abs(scan_range_deg), self.config.scan.range_deg)
@@ -376,6 +400,7 @@ class EdgeRuntime:
             self.safe_hold_started_us = now_us()
             self.last_loss_velocity_px_s = self._estimate_loss_velocity()
             self.redetect_requested = True
+            self.recovery_confirm_count = 0
 
     def _advance_safe_hold(self, dt_s: float) -> None:
         command = self.controller.soft_stop(dt_s)

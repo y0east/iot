@@ -47,11 +47,12 @@ class SafetyConfig:
     bbox_area_growth_threshold: float = 16.0
     bbox_frame_area_threshold: float = 0.85
     bbox_aspect_ratio_change_threshold: float = 8.0
-    consecutive_frames: int = 5
+    consecutive_frames: int = 45
+    recovery_confirm_frames: int = 5
     default_ping_threshold_ms: float = 250.0
-    timeout_min_s: float = 1.5
+    timeout_min_s: float = 3.5
     timeout_max_s: float = 5.0
-    safe_hold_rescan_delay_s: float = 1.0
+    safe_hold_rescan_delay_s: float = 2.5
     limited_rescan_range_deg: float = 10.0
     central_region_ratio: float = 0.60
 
@@ -103,16 +104,17 @@ class ServerConfig:
     wedetect_ref_module: str = ""
     wedetect_ref_script: str = ""
     wedetect_device: str = "cuda:0"
-    yolo_lost_frames: int = 30
+    yolo_lost_frames: int = 45
     yolo_suspect_frames: int = 5
-    yolo_max_center_jump_px: float = 320.0
+    yolo_max_center_jump_px: float = 160.0
     yolo_max_area_growth_ratio: float = 16.0
     yolo_max_frame_area_ratio: float = 0.85
     yolo_max_aspect_ratio_change: float = 8.0
-    yolo_min_iou_on_id_change: float = 0.0
-    yolo_model: str = "yolo26n.pt"
-    tracker: str = "bytetrack.yaml"
+    yolo_min_iou_on_id_change: float = 0.01
+    yolo_model: str = "yolo26m.pt"
+    tracker: str = "botsort.yaml"
     confidence_threshold: float = 0.25
+    wedetect_confidence_threshold: float = 0.45
 
 
 @dataclass(frozen=True)

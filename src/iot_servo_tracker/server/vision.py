@@ -8,6 +8,8 @@ import math
 import subprocess
 import sys
 import tempfile
+import cv2
+import numpy as np
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -232,6 +234,7 @@ class WeDetectYoloPipeline:
         yolo_model: str = "yolo26n.pt",
         tracker: str = "bytetrack.yaml",
         confidence_threshold: float = 0.25,
+        wedetect_confidence_threshold: float = 0.10,
         yolo_lost_frames: int = 12,
         yolo_suspect_frames: int = 2,
         yolo_max_center_jump_px: float = 120.0,
@@ -254,6 +257,7 @@ class WeDetectYoloPipeline:
         self.yolo = YOLO(yolo_model)
         self.tracker = tracker
         self.confidence_threshold = confidence_threshold
+        self.wedetect_confidence_threshold = wedetect_confidence_threshold
         self.yolo_lost_frames = max(1, yolo_lost_frames)
         self.yolo_suspect_frames = max(1, yolo_suspect_frames)
         self.yolo_max_center_jump_px = yolo_max_center_jump_px
@@ -271,6 +275,7 @@ class WeDetectYoloPipeline:
         self.last_yolo_reject_reason = ""
         self.last_inference_source = ""
         self.active_query = ""
+        self.current_frame = None
 
     def process_frame(
         self,
@@ -280,11 +285,15 @@ class WeDetectYoloPipeline:
         frame_index: int = 0,
     ) -> TrackingResult:
         del frame_index
+        try:
+            self.current_frame = self._decode_frame(frame_bytes)
+        except Exception:
+            self.current_frame = None
         self._prepare_query(query)
         if self.locked_bbox is None:
             self.last_inference_source = "wedetect"
             result = self.wedetect_client.detect(frame_bytes, query, ts_req)
-            if result.bbox is not None and result.confidence >= self.confidence_threshold:
+            if result.bbox is not None and result.confidence >= self.wedetect_confidence_threshold:
                 if self.redetect_reference_bbox is not None:
                     reason = self._candidate_rejection_reason(
                         result.bbox,
@@ -302,7 +311,7 @@ class WeDetectYoloPipeline:
                 self.yolo_suspect_count = 0
             return result
 
-        frame = self._decode_frame(frame_bytes)
+        frame = self.current_frame if self.current_frame is not None else self._decode_frame(frame_bytes)
         self.last_inference_source = "yolo"
         results = self.yolo.track(
             frame,
@@ -471,7 +480,7 @@ class WeDetectYoloPipeline:
         self.locked_bbox = None
         self.locked_track_id = None
         result = self.wedetect_client.detect(frame_bytes, query, ts_req)
-        if result.bbox is not None and result.confidence >= self.confidence_threshold:
+        if result.bbox is not None and result.confidence >= self.wedetect_confidence_threshold:
             reason = self._candidate_rejection_reason(
                 result.bbox,
                 result.confidence,
@@ -501,6 +510,9 @@ class WeDetectYoloPipeline:
         previous = previous_bbox or self.locked_bbox
         if confidence < self.confidence_threshold:
             return "YOLO candidate confidence is below threshold"
+        if self._is_overexposed(bbox):
+            return "YOLO candidate is overwhelmingly bright (ceiling light false positive)"
+
         if previous is None:
             return None
         if bbox.area <= 0:
@@ -526,11 +538,32 @@ class WeDetectYoloPipeline:
         return None
 
     def _stable_id_change_candidate(self, bbox: BBox, previous: BBox) -> bool:
-        center_limit = min(self.yolo_max_center_jump_px, 48.0)
+        center_limit = min(self.yolo_max_center_jump_px, 120.0)
         return (
             _center_distance(bbox, previous) <= center_limit
             and _area_ratio_ok(bbox, previous, max_ratio=2.0)
         )
+
+    def _is_overexposed(self, bbox: BBox) -> bool:
+        """Reject false positives that are overwhelmingly bright (e.g., ceiling lights)."""
+        if self.current_frame is None:
+            return False
+            
+        x1, y1 = max(0, int(bbox.x1)), max(0, int(bbox.y1))
+        x2, y2 = min(self.current_frame.shape[1], int(bbox.x2)), min(self.current_frame.shape[0], int(bbox.y2))
+        
+        if x2 <= x1 or y2 <= y1:
+            return False
+            
+        roi = self.current_frame[y1:y2, x1:x2]
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        
+        # If more than 50% of the bounding box is near pure white (blown out), it's a light source
+        bright_pixels = np.sum(gray > 230)
+        if bright_pixels / float(gray.size) > 0.5:
+            return True
+            
+        return False
 
 
 def build_wedetect_client(config: ServerConfig) -> WeDetectClient:

@@ -55,6 +55,13 @@ class PDServoController:
             self.config.control.max_speed_deg_s,
         )
 
+    def reset_history(self) -> None:
+        """Reset PID error history to prevent derivative kick (sudden jerks) when tracking resumes."""
+        self.state.prev_yaw_error_deg = 0.0
+        self.state.prev_pitch_error_deg = 0.0
+        self.state.filtered_yaw_derivative = 0.0
+        self.state.filtered_pitch_derivative = 0.0
+
     def update(self, bbox: BBox, dt_s: float) -> ServoCommand:
         dt_s = max(dt_s, 1e-3)
         yaw_error, pitch_error = pixel_error_to_angle_deg(bbox, self.config.camera)

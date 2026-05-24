@@ -17,7 +17,9 @@ def main() -> None:
         raise RuntimeError("Install optional dependency: pip install '.[web]'") from exc
 
     st.set_page_config(page_title="IoT Servo Tracker", layout="wide")
-    config_path = Path("config/settings.toml")
+    import os
+    config_env = os.getenv("IOT_CONFIG")
+    config_path = Path(config_env) if config_env else Path("config/settings.toml")
     config = load_config(config_path if config_path.exists() else None)
     status_store = _status_store(st, config)
 
@@ -76,9 +78,9 @@ def _publish_or_show(st, config, cmd_type: CommandType, query: str = "", scan=45
         client = build_paho_client(config.mqtt)
         client.publish(config.mqtt.command_topic, payload, qos=1)
         client.disconnect()
-        st.success(f"Published {command.cmd_type} command")
+        st.toast(f"Published {command.cmd_type} command", icon="✅")
     except Exception as exc:  # noqa: BLE001
-        st.warning(f"MQTT publish skipped: {exc}")
+        st.toast(f"MQTT publish skipped: {exc}", icon="⚠️")
 
 
 def _status_store(st, config):

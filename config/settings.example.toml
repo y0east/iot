@@ -87,7 +87,7 @@ consecutive_frames = 5
 default_ping_threshold_ms = 250.0
 timeout_min_s = 1.5
 timeout_max_s = 5.0
-safe_hold_rescan_delay_s = 1.0
+safe_hold_rescan_delay_s = 2.5
 limited_rescan_range_deg = 10.0
 central_region_ratio = 0.60
 

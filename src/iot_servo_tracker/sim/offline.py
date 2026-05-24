@@ -284,7 +284,7 @@ def _with_scenario_defaults(options: SimulationOptions) -> SimulationOptions:
             switch_step=52,
         )
     if options.scenario == "sensor":
-        return _replace_defaults(options, sensor_spike_start=45, sensor_spike_steps=7)
+        return _replace_defaults(options, sensor_spike_start=45, sensor_spike_steps=15)
     raise ValueError(f"unknown simulation scenario: {options.scenario}")
 
 

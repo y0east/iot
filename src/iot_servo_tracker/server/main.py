@@ -43,6 +43,7 @@ def main(argv: list[str] | None = None) -> None:
             yolo_model=config.server.yolo_model,
             tracker=config.server.tracker,
             confidence_threshold=config.server.confidence_threshold,
+            wedetect_confidence_threshold=config.server.wedetect_confidence_threshold,
             yolo_lost_frames=config.server.yolo_lost_frames,
             yolo_suspect_frames=config.server.yolo_suspect_frames,
             yolo_max_center_jump_px=config.server.yolo_max_center_jump_px,

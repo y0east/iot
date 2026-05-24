@@ -83,6 +83,7 @@ def build_test_pipeline(yolo, wedetect_client=None):
     pipeline.yolo = yolo
     pipeline.tracker = "bytetrack.yaml"
     pipeline.confidence_threshold = 0.25
+    pipeline.wedetect_confidence_threshold = 0.10
     pipeline.yolo_lost_frames = 2
     pipeline.yolo_suspect_frames = 1
     pipeline.yolo_max_center_jump_px = 120.0
