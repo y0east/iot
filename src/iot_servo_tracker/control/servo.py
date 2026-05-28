@@ -125,10 +125,17 @@ class NativeSysfsServoDriver:
 
     def __init__(self, pan_limit: AxisLimit, tilt_limit: AxisLimit, pwmchip: int = 0) -> None:
         import os
+        import time
         self.pan_limit = pan_limit
         self.tilt_limit = tilt_limit
         self.pwmchip = pwmchip
         self.os = os
+        self.time = time
+        self._last_pan_ns: int | None = None
+        self._last_tilt_ns: int | None = None
+        self._last_write_s = 0.0
+        self._deadband_ns = 5_000
+        self._min_write_interval_s = 0.02
 
         self._init_pwm(0)
         self._init_pwm(1)
@@ -161,11 +168,26 @@ class NativeSysfsServoDriver:
     def apply(self, command: ServoCommand) -> None:
         pan_ns = self._angle_to_ns(command.pan_deg, self.pan_limit)
         tilt_ns = self._angle_to_ns(command.tilt_deg, self.tilt_limit)
+        now_s = self.time.monotonic()
+        pan_changed = self._duty_changed(pan_ns, self._last_pan_ns)
+        tilt_changed = self._duty_changed(tilt_ns, self._last_tilt_ns)
+        if not pan_changed and not tilt_changed:
+            return
+        if now_s - self._last_write_s < self._min_write_interval_s:
+            return
 
         try:
-            with open(f"/sys/class/pwm/pwmchip{self.pwmchip}/pwm0/duty_cycle", "w") as f:
-                f.write(str(pan_ns))
-            with open(f"/sys/class/pwm/pwmchip{self.pwmchip}/pwm1/duty_cycle", "w") as f:
-                f.write(str(tilt_ns))
+            if pan_changed:
+                with open(f"/sys/class/pwm/pwmchip{self.pwmchip}/pwm0/duty_cycle", "w") as f:
+                    f.write(str(pan_ns))
+                self._last_pan_ns = pan_ns
+            if tilt_changed:
+                with open(f"/sys/class/pwm/pwmchip{self.pwmchip}/pwm1/duty_cycle", "w") as f:
+                    f.write(str(tilt_ns))
+                self._last_tilt_ns = tilt_ns
+            self._last_write_s = now_s
         except OSError:
             pass # Ignore occasional permission/write errors if the kernel is busy
+
+    def _duty_changed(self, current_ns: int, previous_ns: int | None) -> bool:
+        return previous_ns is None or abs(current_ns - previous_ns) >= self._deadband_ns

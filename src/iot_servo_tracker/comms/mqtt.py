@@ -86,7 +86,7 @@ class MqttEdgeBridge:
         self.client.disconnect()
 
     def publish_status(self, status: StatusAck) -> None:
-        self.client.publish(self.config.status_topic, status.to_json(), qos=1, retain=True)
+        self.client.publish(self.config.status_topic, status.to_json(), qos=0, retain=True)
 
     def _on_message(self, _client, _userdata, message) -> None:
         try:

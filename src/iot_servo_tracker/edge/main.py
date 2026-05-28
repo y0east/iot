@@ -89,6 +89,9 @@ def run_edge(args: argparse.Namespace) -> None:
     last_frame_send_s = 0.0
     last_sent_frame_sequence = None
     min_frame_interval_s = 1.0 / 15.0
+    last_status_publish_s = 0.0
+    last_status_event_key = None
+    status_publish_interval_s = 0.10
     try:
         while True:
             loop_s = time.monotonic()
@@ -122,7 +125,18 @@ def run_edge(args: argparse.Namespace) -> None:
                 )
             else:
                 last_status = runtime.control_step(dt_s=dt_s, sensor_sample=sensor)
-            bridge.publish_status(last_status)
+            status_event_key = (
+                last_status.system_state,
+                last_status.ack,
+                last_status.message,
+            )
+            if (
+                loop_s - last_status_publish_s >= status_publish_interval_s
+                or status_event_key != last_status_event_key
+            ):
+                bridge.publish_status(last_status)
+                last_status_publish_s = loop_s
+                last_status_event_key = status_event_key
             time.sleep(0.01)
     except KeyboardInterrupt:
         bridge.publish_status(runtime.handle_command(CommandPacket.create(CommandType.CENTER)))
