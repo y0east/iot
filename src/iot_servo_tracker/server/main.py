@@ -12,6 +12,7 @@ from iot_servo_tracker.common.timebase import now_us
 from iot_servo_tracker.comms.zmq_socket import ZmqVisionTransport
 from iot_servo_tracker.server.runtime import VisionRuntime
 from iot_servo_tracker.server.vision import WeDetectYoloPipeline, build_wedetect_client
+from iot_servo_tracker.server.mjpeg import BackgroundMjpegServer
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -23,6 +24,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--wedetect-ref-module", default=None)
     parser.add_argument("--wedetect-ref-script", default=None)
     parser.add_argument("--wedetect-repo", default=None)
+    parser.add_argument("--mjpeg", action="store_true", help="Start background MJPEG stream on port 8000")
     args = parser.parse_args(argv)
 
     config = load_config(args.config)
@@ -54,14 +56,25 @@ def main(argv: list[str] | None = None) -> None:
             camera=config.camera,
         )
     runtime = VisionRuntime(config, pipeline=pipeline)
+    
+    mjpeg_server = None
+    if args.mjpeg:
+        mjpeg_server = BackgroundMjpegServer(port=8000)
+        mjpeg_server.start()
+        print("[server] Background MJPEG stream started at http://127.0.0.1:8000/stream.mjpg", file=sys.stderr, flush=True)
+
     if args.serve:
-        serve(config, runtime)
+        try:
+            serve(config, runtime, mjpeg_server)
+        finally:
+            if mjpeg_server:
+                mjpeg_server.stop()
         return
     result = runtime.process(ts_req=now_us(), query=args.query, frame_bytes=b"demo")
     print(result.to_json())
 
 
-def serve(config, runtime: VisionRuntime) -> None:
+def serve(config, runtime: VisionRuntime, mjpeg_server: BackgroundMjpegServer | None = None) -> None:
     transport = ZmqVisionTransport(
         config.zmq.frame_bind_endpoint,
         config.zmq.result_bind_endpoint,
@@ -82,6 +95,10 @@ def serve(config, runtime: VisionRuntime) -> None:
                 redetect=bool(header.get("redetect", False)),
             )
             transport.send_result(result)
+            if mjpeg_server is not None:
+                query = header.get("query", "")
+                label = f"{query} conf={result.confidence:.2f}" if result.bbox else f"{query} no bbox"
+                mjpeg_server.update_frame(payload, bbox=result.bbox, label=label)
     except KeyboardInterrupt:
         return
     finally:

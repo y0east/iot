@@ -10,7 +10,7 @@ from iot_servo_tracker.common.packets import CommandPacket, CommandType, SensorS
 from iot_servo_tracker.common.timebase import now_us
 from iot_servo_tracker.comms.mqtt import MqttEdgeBridge
 from iot_servo_tracker.comms.zmq_socket import ZmqEdgeTransport
-from iot_servo_tracker.control.servo import Pca9685ServoDriver, SimulatedServoDriver
+from iot_servo_tracker.control.servo import Pca9685ServoDriver, SimulatedServoDriver, DirectGpioServoDriver
 from iot_servo_tracker.edge.camera import OpenCvCamera, SimulatedCamera
 from iot_servo_tracker.edge.runtime import EdgeRuntime
 from iot_servo_tracker.edge.sensors import RaspberryPiSensorReader, SimulatedSensorReader
@@ -25,6 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--camera-index", type=int, default=0)
     parser.add_argument("--simulated-camera", action="store_true")
     parser.add_argument("--hardware-servo", action="store_true")
+    parser.add_argument("--direct-servo", action="store_true", help="Connect servos directly to RPi GPIO without PCA9685")
     parser.add_argument("--hardware-sensors", action="store_true")
     return parser
 
@@ -41,11 +42,12 @@ def main(argv: list[str] | None = None) -> None:
         run_edge(args)
         return
     config = load_config(args.config)
-    servo = (
-        Pca9685ServoDriver(config.control.pan, config.control.tilt)
-        if args.hardware_servo
-        else SimulatedServoDriver()
-    )
+    if args.hardware_servo:
+        servo = Pca9685ServoDriver(config.control.pan, config.control.tilt)
+    elif args.direct_servo:
+        servo = DirectGpioServoDriver(config.control.pan, config.control.tilt)
+    else:
+        servo = SimulatedServoDriver()
     runtime = EdgeRuntime(config=config, servo=servo)
     status = runtime.handle_command(CommandPacket.create(CommandType.CENTER))
     print(status.to_json())
@@ -53,11 +55,12 @@ def main(argv: list[str] | None = None) -> None:
 
 def run_edge(args: argparse.Namespace) -> None:
     config = load_config(args.config)
-    servo = (
-        Pca9685ServoDriver(config.control.pan, config.control.tilt)
-        if args.hardware_servo
-        else SimulatedServoDriver()
-    )
+    if args.hardware_servo:
+        servo = Pca9685ServoDriver(config.control.pan, config.control.tilt)
+    elif args.direct_servo:
+        servo = DirectGpioServoDriver(config.control.pan, config.control.tilt)
+    else:
+        servo = SimulatedServoDriver()
     runtime = EdgeRuntime(config=config, servo=servo)
     transport = ZmqEdgeTransport(
         config.zmq.frame_connect_endpoint,

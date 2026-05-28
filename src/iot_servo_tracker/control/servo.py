@@ -71,3 +71,38 @@ class Pca9685ServoDriver:
 def _servo_angle(angle_deg: float, limit: AxisLimit) -> float:
     ratio = (angle_deg - limit.min_deg) / (limit.max_deg - limit.min_deg)
     return min(180.0, max(0.0, ratio * 180.0))
+
+
+class DirectGpioServoDriver:
+    """Direct GPIO servo driver using gpiozero (for Raspberry Pi direct connection)."""
+
+    def __init__(
+        self,
+        pan_limit: AxisLimit,
+        tilt_limit: AxisLimit,
+        pan_pin: int = 12,
+        tilt_pin: int = 13,
+    ) -> None:
+        try:
+            from gpiozero import AngularServo
+        except ImportError as exc:
+            raise RuntimeError("Install gpiozero on Raspberry Pi (pip install gpiozero)") from exc
+
+        self.pan_servo = AngularServo(
+            pan_pin,
+            min_angle=pan_limit.min_deg,
+            max_angle=pan_limit.max_deg,
+            min_pulse_width=pan_limit.pwm_min_us / 1000000.0,
+            max_pulse_width=pan_limit.pwm_max_us / 1000000.0,
+        )
+        self.tilt_servo = AngularServo(
+            tilt_pin,
+            min_angle=tilt_limit.min_deg,
+            max_angle=tilt_limit.max_deg,
+            min_pulse_width=tilt_limit.pwm_min_us / 1000000.0,
+            max_pulse_width=tilt_limit.pwm_max_us / 1000000.0,
+        )
+
+    def apply(self, command: ServoCommand) -> None:
+        self.pan_servo.angle = command.pan_deg
+        self.tilt_servo.angle = command.tilt_deg
