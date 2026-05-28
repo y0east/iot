@@ -1,7 +1,7 @@
 import time
 from iot_servo_tracker.control.servo import NativeSysfsServoDriver
+from iot_servo_tracker.control.pd_controller import ServoCommand
 from iot_servo_tracker.common.config import load_config
-from iot_servo_tracker.common.packets import ServoCommand
 
 def main():
     print("====================================")
