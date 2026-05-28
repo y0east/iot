@@ -115,3 +115,15 @@ class BackgroundMjpegServer:
             _LATEST_RAW_JPEG = raw_jpeg
             _LATEST_BBOX = tup
             _LATEST_LABEL = label
+
+    def update_raw_jpeg(self, raw_jpeg: bytes):
+        global _LATEST_RAW_JPEG
+        with _FRAME_LOCK:
+            _LATEST_RAW_JPEG = raw_jpeg
+
+    def update_bbox(self, bbox: Any = None, label: str = ""):
+        global _LATEST_BBOX, _LATEST_LABEL
+        tup = (bbox.x1, bbox.y1, bbox.x2, bbox.y2) if bbox is not None else None
+        with _FRAME_LOCK:
+            _LATEST_BBOX = tup
+            _LATEST_LABEL = label

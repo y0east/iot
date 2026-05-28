@@ -81,12 +81,23 @@ def serve(config, runtime: VisionRuntime, mjpeg_server: BackgroundMjpegServer | 
         frame_rcv_hwm=config.zmq.frame_rcv_hwm,
         result_snd_hwm=config.zmq.result_snd_hwm,
     )
-    try:
+    import threading
+    import time
+    
+    # AI 쓰레드와 메인 쓰레드가 공유할 최신 프레임
+    state_lock = threading.Lock()
+    latest_frame = None
+
+    def inference_loop():
         while True:
-            frame = transport.recv_frame(timeout_ms=1000)
-            if frame is None:
+            with state_lock:
+                frame_to_process = latest_frame
+            
+            if frame_to_process is None:
+                time.sleep(0.01)
                 continue
-            header, payload = frame
+                
+            header, payload = frame_to_process
             result = process_frame_safely(
                 runtime,
                 ts_req=int(header["ts_req"]),
@@ -95,10 +106,29 @@ def serve(config, runtime: VisionRuntime, mjpeg_server: BackgroundMjpegServer | 
                 redetect=bool(header.get("redetect", False)),
             )
             transport.send_result(result)
+            
             if mjpeg_server is not None:
                 query = header.get("query", "")
                 label = f"{query} conf={result.confidence:.2f}" if result.bbox else f"{query} no bbox"
-                mjpeg_server.update_frame(payload, bbox=result.bbox, label=label)
+                mjpeg_server.update_bbox(result.bbox, label)
+
+    inference_thread = threading.Thread(target=inference_loop, daemon=True)
+    inference_thread.start()
+
+    try:
+        while True:
+            frame = transport.recv_frame(timeout_ms=1000)
+            if frame is None:
+                continue
+            header, payload = frame
+            
+            # 영상은 들어오는 즉시(15FPS) 딜레이 없이 렌더링
+            if mjpeg_server is not None:
+                mjpeg_server.update_raw_jpeg(payload)
+                
+            # 무거운 AI 처리를 위해 최신 프레임 업데이트
+            with state_lock:
+                latest_frame = frame
     except KeyboardInterrupt:
         return
     finally:
