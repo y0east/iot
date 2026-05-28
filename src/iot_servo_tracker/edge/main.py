@@ -86,6 +86,7 @@ def run_edge(args: argparse.Namespace) -> None:
     frame_index = 0
     last_status = runtime.last_status
     last_loop_s = time.monotonic()
+    last_control_s = last_loop_s
     last_frame_send_s = 0.0
     last_sent_frame_sequence = None
     min_frame_interval_s = 1.0 / 15.0
@@ -97,6 +98,7 @@ def run_edge(args: argparse.Namespace) -> None:
             loop_s = time.monotonic()
             dt_s = _bounded_dt_s(loop_s - last_loop_s)
             last_loop_s = loop_s
+            control_dt_s = _bounded_dt_s(loop_s - last_control_s)
             ts_req = now_us()
             frame = camera.read_jpeg()
             frame_sequence = getattr(camera, "last_read_sequence", getattr(camera, "frame_sequence", None))
@@ -120,11 +122,20 @@ def run_edge(args: argparse.Namespace) -> None:
                 last_status = runtime.handle_tracking_result(
                     result,
                     sensor,
-                    dt_s=dt_s,
+                    dt_s=control_dt_s,
                     received_ts_us=now_us(),
                 )
+                last_control_s = loop_s
             else:
-                last_status = runtime.control_step(dt_s=dt_s, sensor_sample=sensor)
+                control_states = {"SCAN", "SAFE_HOLD", "LIMITED_RESCAN", "CENTERING"}
+                if runtime.state.value in control_states:
+                    last_status = runtime.control_step(
+                        dt_s=control_dt_s,
+                        sensor_sample=sensor,
+                    )
+                    last_control_s = loop_s
+                else:
+                    last_status = runtime.control_step(dt_s=dt_s, sensor_sample=sensor)
             status_event_key = (
                 last_status.system_state,
                 last_status.ack,
