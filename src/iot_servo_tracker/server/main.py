@@ -129,8 +129,9 @@ def serve(config, runtime: VisionRuntime, mjpeg_server: BackgroundMjpegServer | 
                 mjpeg_server.update_raw_jpeg(payload)
                 
             # 무거운 AI 처리를 위해 최신 프레임 업데이트
-            with state_lock:
-                latest_frame = frame
+            if header.get("query"):
+                with state_lock:
+                    latest_frame = frame
     except KeyboardInterrupt:
         return
     finally:

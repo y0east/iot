@@ -134,8 +134,8 @@ class NativeSysfsServoDriver:
         self._last_pan_ns: int | None = None
         self._last_tilt_ns: int | None = None
         self._last_write_s = 0.0
-        self._deadband_ns = 5_000
-        self._min_write_interval_s = 0.02
+        self._deadband_ns = 1_000
+        self._min_write_interval_s = 0.0
 
         self._init_pwm(0)
         self._init_pwm(1)

@@ -103,7 +103,7 @@ def run_edge(args: argparse.Namespace) -> None:
             query, redetect = runtime.next_frame_request()
             is_new_frame = frame_sequence is None or frame_sequence != last_sent_frame_sequence
             fallback_due = frame_sequence is not None or (loop_s - last_frame_send_s) >= min_frame_interval_s
-            if query and is_new_frame and fallback_due:
+            if is_new_frame and fallback_due:
                 if transport.send_frame(
                     ts_req,
                     query,
