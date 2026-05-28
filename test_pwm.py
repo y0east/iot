@@ -11,7 +11,7 @@ def main():
 
     # 0도 -> 45도 -> -45도 -> 0도 순서로 아주 부드럽게 이동합니다
     for angle in list(range(0, 45, 1)) + list(range(45, -45, -1)) + list(range(-45, 0, 1)):
-        servo.apply(ServoCommand(pan_deg=angle, tilt_deg=angle))
+        servo.apply(ServoCommand(pan_deg=angle, tilt_deg=angle, pan_pwm_us=0, tilt_pwm_us=0, pan_omega_deg_s=0.0, tilt_omega_deg_s=0.0))
         time.sleep(0.015)
         
     print("테스트 완료! 지터 없이 부드러운가요?")
