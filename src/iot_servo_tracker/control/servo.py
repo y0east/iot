@@ -106,12 +106,12 @@ class DirectGpioServoDriver:
         self._last_tilt_deg = None
 
     def apply(self, command: ServoCommand) -> None:
-        # 소프트웨어 PWM의 고질적인 지터(Jitter) 현상을 방지하기 위해,
-        # 각도가 0.1도 이상 변했을 때만 모터에 신호를 보냅니다. (1초에 100번씩 같은 신호를 쏘면 모터가 떱니다)
-        if self._last_pan_deg is None or abs(self._last_pan_deg - command.pan_deg) > 0.1:
+        # pigpio가 안 먹히는 환경(라즈베리파이 5 등)을 위해 데드밴드를 0.01도로 아주 작게 줄이거나 없앱니다.
+        # 확확 돌아가는 현상을 없애고 최대한 부드럽게 따라가도록 원복합니다.
+        if self._last_pan_deg is None or abs(self._last_pan_deg - command.pan_deg) > 0.01:
             self.pan_servo.angle = command.pan_deg
             self._last_pan_deg = command.pan_deg
             
-        if self._last_tilt_deg is None or abs(self._last_tilt_deg - command.tilt_deg) > 0.1:
+        if self._last_tilt_deg is None or abs(self._last_tilt_deg - command.tilt_deg) > 0.01:
             self.tilt_servo.angle = command.tilt_deg
             self._last_tilt_deg = command.tilt_deg
