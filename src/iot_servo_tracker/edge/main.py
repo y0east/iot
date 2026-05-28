@@ -9,6 +9,7 @@ from iot_servo_tracker.common.config import load_config
 from iot_servo_tracker.common.packets import CommandPacket, CommandType, SensorSample
 from iot_servo_tracker.common.timebase import now_us
 from iot_servo_tracker.comms.mqtt import MqttEdgeBridge
+from iot_servo_tracker.comms.zmq_socket import ZmqEdgeTransport
 from iot_servo_tracker.control.servo import Pca9685ServoDriver, SimulatedServoDriver, DirectGpioServoDriver, NativeSysfsServoDriver
 from iot_servo_tracker.edge.camera import OpenCvCamera, SimulatedCamera, RpiCamVidCamera
 from iot_servo_tracker.edge.runtime import EdgeRuntime
