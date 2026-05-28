@@ -86,6 +86,9 @@ def run_edge(args: argparse.Namespace) -> None:
     frame_index = 0
     last_status = runtime.last_status
     last_loop_s = time.monotonic()
+    last_frame_send_s = 0.0
+    last_sent_frame_sequence = None
+    min_frame_interval_s = 1.0 / 15.0
     try:
         while True:
             loop_s = time.monotonic()
@@ -93,8 +96,11 @@ def run_edge(args: argparse.Namespace) -> None:
             last_loop_s = loop_s
             ts_req = now_us()
             frame = camera.read_jpeg()
+            frame_sequence = getattr(camera, "last_read_sequence", getattr(camera, "frame_sequence", None))
             query, redetect = runtime.next_frame_request()
-            if query:
+            is_new_frame = frame_sequence is None or frame_sequence != last_sent_frame_sequence
+            fallback_due = frame_sequence is not None or (loop_s - last_frame_send_s) >= min_frame_interval_s
+            if query and is_new_frame and fallback_due:
                 if transport.send_frame(
                     ts_req,
                     query,
@@ -103,6 +109,8 @@ def run_edge(args: argparse.Namespace) -> None:
                     redetect=redetect,
                 ):
                     frame_index += 1
+                last_sent_frame_sequence = frame_sequence
+                last_frame_send_s = loop_s
             result = transport.recv_result(timeout_ms=1)
             sensor = _read_sensor_sample(sensors)
             if result is not None:

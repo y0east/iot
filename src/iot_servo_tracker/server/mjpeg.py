@@ -9,12 +9,14 @@ from typing import Any
 
 _FRAME_LOCK = threading.Lock()
 _LATEST_RAW_JPEG: bytes | None = None
+_LATEST_STREAM_JPEG: bytes | None = None
 _LATEST_BBOX: tuple[float, float, float, float] | None = None
 _LATEST_LABEL: str = ""
+_LATEST_FRAME_VERSION = 0
 
 
 class MJPEGStreamHandler(BaseHTTPRequestHandler):
-    """Serve MJPEG stream, decoding and annotating on-the-fly per client."""
+    """Serve the latest pre-rendered MJPEG frame to each client."""
 
     def do_GET(self):
         if self.path != "/stream.mjpg":
@@ -25,49 +27,19 @@ class MJPEGStreamHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
         self.end_headers()
 
-        try:
-            import cv2
-            import numpy as np
-        except ImportError:
-            cv2 = None
-            np = None
-
         last_processed = -1
 
         try:
             while True:
                 with _FRAME_LOCK:
-                    raw_jpeg = _LATEST_RAW_JPEG
-                    bbox = _LATEST_BBOX
-                    label = _LATEST_LABEL
+                    out_jpeg = _LATEST_STREAM_JPEG
+                    version = _LATEST_FRAME_VERSION
 
-                if raw_jpeg is None or id(raw_jpeg) == last_processed:
+                if out_jpeg is None or version == last_processed:
                     time.sleep(0.03)
                     continue
 
-                last_processed = id(raw_jpeg)
-                out_jpeg = raw_jpeg
-
-                if cv2 is not None and np is not None and bbox is not None:
-                    array = np.frombuffer(raw_jpeg, dtype=np.uint8)
-                    frame = cv2.imdecode(array, cv2.IMREAD_COLOR)
-                    if frame is not None:
-                        x1, y1, x2, y2 = [max(0, int(v)) for v in bbox]
-                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 220, 0), 2)
-                        if label:
-                            cv2.putText(
-                                frame,
-                                label,
-                                (x1, max(24, y1 - 8)),
-                                cv2.FONT_HERSHEY_SIMPLEX,
-                                0.55,
-                                (0, 220, 0),
-                                2,
-                                cv2.LINE_AA,
-                            )
-                        ok, encoded = cv2.imencode(".jpg", frame)
-                        if ok:
-                            out_jpeg = encoded.tobytes()
+                last_processed = version
 
                 header = (
                     b"--frame\r\n"
@@ -109,21 +81,71 @@ class BackgroundMjpegServer:
             self.server.server_close()
 
     def update_frame(self, raw_jpeg: bytes, bbox: Any = None, label: str = ""):
-        global _LATEST_RAW_JPEG, _LATEST_BBOX, _LATEST_LABEL
+        global _LATEST_RAW_JPEG, _LATEST_STREAM_JPEG, _LATEST_BBOX, _LATEST_LABEL
+        global _LATEST_FRAME_VERSION
         tup = (bbox.x1, bbox.y1, bbox.x2, bbox.y2) if bbox is not None else None
+        stream_jpeg = _annotate_frame_jpeg(raw_jpeg, tup, label)
         with _FRAME_LOCK:
             _LATEST_RAW_JPEG = raw_jpeg
+            _LATEST_STREAM_JPEG = stream_jpeg
             _LATEST_BBOX = tup
             _LATEST_LABEL = label
+            _LATEST_FRAME_VERSION += 1
 
     def update_raw_jpeg(self, raw_jpeg: bytes):
-        global _LATEST_RAW_JPEG
+        global _LATEST_RAW_JPEG, _LATEST_STREAM_JPEG, _LATEST_FRAME_VERSION
+        with _FRAME_LOCK:
+            bbox = _LATEST_BBOX
+            label = _LATEST_LABEL
+        stream_jpeg = _annotate_frame_jpeg(raw_jpeg, bbox, label)
         with _FRAME_LOCK:
             _LATEST_RAW_JPEG = raw_jpeg
+            _LATEST_STREAM_JPEG = stream_jpeg
+            _LATEST_FRAME_VERSION += 1
 
     def update_bbox(self, bbox: Any = None, label: str = ""):
-        global _LATEST_BBOX, _LATEST_LABEL
+        global _LATEST_STREAM_JPEG, _LATEST_BBOX, _LATEST_LABEL, _LATEST_FRAME_VERSION
         tup = (bbox.x1, bbox.y1, bbox.x2, bbox.y2) if bbox is not None else None
+        with _FRAME_LOCK:
+            raw_jpeg = _LATEST_RAW_JPEG
+        stream_jpeg = _annotate_frame_jpeg(raw_jpeg, tup, label) if raw_jpeg is not None else None
         with _FRAME_LOCK:
             _LATEST_BBOX = tup
             _LATEST_LABEL = label
+            if stream_jpeg is not None:
+                _LATEST_STREAM_JPEG = stream_jpeg
+                _LATEST_FRAME_VERSION += 1
+
+
+def _annotate_frame_jpeg(
+    raw_jpeg: bytes,
+    bbox: tuple[float, float, float, float] | None,
+    label: str = "",
+) -> bytes:
+    if bbox is None:
+        return raw_jpeg
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        return raw_jpeg
+
+    array = np.frombuffer(raw_jpeg, dtype=np.uint8)
+    frame = cv2.imdecode(array, cv2.IMREAD_COLOR)
+    if frame is None:
+        return raw_jpeg
+    x1, y1, x2, y2 = [max(0, int(v)) for v in bbox]
+    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 220, 0), 2)
+    if label:
+        cv2.putText(
+            frame,
+            label,
+            (x1, max(24, y1 - 8)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (0, 220, 0),
+            2,
+            cv2.LINE_AA,
+        )
+    ok, encoded = cv2.imencode(".jpg", frame)
+    return encoded.tobytes() if ok else raw_jpeg

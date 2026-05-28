@@ -89,9 +89,11 @@ def serve(config, runtime: VisionRuntime, mjpeg_server: BackgroundMjpegServer | 
     latest_frame = None
 
     def inference_loop():
+        nonlocal latest_frame
         while True:
             with state_lock:
                 frame_to_process = latest_frame
+                latest_frame = None
             
             if frame_to_process is None:
                 time.sleep(0.01)

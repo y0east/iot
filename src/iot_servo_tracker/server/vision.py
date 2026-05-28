@@ -546,7 +546,7 @@ class WeDetectYoloPipeline:
 
     def _is_overexposed(self, bbox: BBox) -> bool:
         """Reject false positives that are overwhelmingly bright (e.g., ceiling lights)."""
-        if self.current_frame is None:
+        if self.current_frame is None or not hasattr(self.current_frame, "shape"):
             return False
             
         x1, y1 = max(0, int(bbox.x1)), max(0, int(bbox.y1))

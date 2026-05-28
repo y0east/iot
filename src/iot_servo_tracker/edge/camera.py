@@ -42,6 +42,8 @@ class OpenCvCamera:
             raise RuntimeError(f"failed to open camera index {device_index}")
 
         self.latest_frame = None
+        self.frame_sequence = 0
+        self.last_read_sequence = 0
         self.lock = threading.Lock()
         self.running = True
 
@@ -61,12 +63,14 @@ class OpenCvCamera:
             if ok:
                 with self.lock:
                     self.latest_frame = frame
+                    self.frame_sequence += 1
             else:
                 time.sleep(0.01)
 
     def read_jpeg(self) -> bytes:
         with self.lock:
             frame = self.latest_frame
+            self.last_read_sequence = self.frame_sequence
         if frame is None:
             raise RuntimeError("failed to read camera frame (no frames arrived yet)")
             
@@ -91,6 +95,8 @@ class RpiCamVidCamera:
         import time
 
         self.latest_frame = None
+        self.frame_sequence = 0
+        self.last_read_sequence = 0
         self.lock = threading.Lock()
         self.running = True
 
@@ -147,6 +153,7 @@ class RpiCamVidCamera:
                 
                 with self.lock:
                     self.latest_frame = buffer[start : end + 2]
+                    self.frame_sequence += 1
                 buffer = buffer[end + 2 :]
             
             # Prevent buffer from growing infinitely if stream is corrupted
@@ -156,6 +163,7 @@ class RpiCamVidCamera:
     def read_jpeg(self) -> bytes:
         with self.lock:
             frame = self.latest_frame
+            self.last_read_sequence = self.frame_sequence
         if frame is None:
             raise RuntimeError("failed to read camera frame (rpicam-vid produced no frames)")
         return frame

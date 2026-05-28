@@ -111,7 +111,7 @@ class ServerConfig:
     yolo_max_frame_area_ratio: float = 0.85
     yolo_max_aspect_ratio_change: float = 8.0
     yolo_min_iou_on_id_change: float = 0.01
-    yolo_model: str = "yolo26m.pt"
+    yolo_model: str = "yolo26n.pt"
     tracker: str = "botsort.yaml"
     confidence_threshold: float = 0.25
     wedetect_confidence_threshold: float = 0.45
