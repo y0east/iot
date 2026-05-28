@@ -11,7 +11,7 @@ from iot_servo_tracker.common.timebase import now_us
 from iot_servo_tracker.comms.mqtt import MqttEdgeBridge
 from iot_servo_tracker.comms.zmq_socket import ZmqEdgeTransport
 from iot_servo_tracker.control.servo import Pca9685ServoDriver, SimulatedServoDriver, DirectGpioServoDriver
-from iot_servo_tracker.edge.camera import OpenCvCamera, SimulatedCamera
+from iot_servo_tracker.edge.camera import OpenCvCamera, SimulatedCamera, RpiCamVidCamera
 from iot_servo_tracker.edge.runtime import EdgeRuntime
 from iot_servo_tracker.edge.sensors import RaspberryPiSensorReader, SimulatedSensorReader
 
@@ -23,6 +23,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--run", action="store_true", help="Run the MQTT/ZMQ edge loop")
     parser.add_argument("--query", default="red cup", help="Simulation target query")
     parser.add_argument("--camera-index", type=int, default=0)
+    parser.add_argument("--rpicam", action="store_true", help="Use rpicam-vid for native Raspberry Pi Camera")
     parser.add_argument("--simulated-camera", action="store_true")
     parser.add_argument("--hardware-servo", action="store_true")
     parser.add_argument("--direct-servo", action="store_true", help="Connect servos directly to RPi GPIO without PCA9685")
@@ -68,11 +69,12 @@ def run_edge(args: argparse.Namespace) -> None:
         frame_snd_hwm=config.zmq.frame_snd_hwm,
         result_rcv_hwm=config.zmq.result_rcv_hwm,
     )
-    camera = (
-        SimulatedCamera()
-        if args.simulated_camera
-        else OpenCvCamera(args.camera_index, config.camera.width, config.camera.height)
-    )
+    if args.simulated_camera:
+        camera = SimulatedCamera()
+    elif args.rpicam:
+        camera = RpiCamVidCamera(config.camera.width, config.camera.height)
+    else:
+        camera = OpenCvCamera(args.camera_index, config.camera.width, config.camera.height)
     sensors = RaspberryPiSensorReader() if args.hardware_sensors else SimulatedSensorReader()
     bridge = MqttEdgeBridge(config.mqtt, runtime.handle_command)
     bridge.start()
