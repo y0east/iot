@@ -9,8 +9,7 @@ from iot_servo_tracker.common.config import load_config
 from iot_servo_tracker.common.packets import CommandPacket, CommandType, SensorSample
 from iot_servo_tracker.common.timebase import now_us
 from iot_servo_tracker.comms.mqtt import MqttEdgeBridge
-from iot_servo_tracker.comms.zmq_socket import ZmqEdgeTransport
-from iot_servo_tracker.control.servo import Pca9685ServoDriver, SimulatedServoDriver, DirectGpioServoDriver
+from iot_servo_tracker.control.servo import Pca9685ServoDriver, SimulatedServoDriver, DirectGpioServoDriver, NativeSysfsServoDriver
 from iot_servo_tracker.edge.camera import OpenCvCamera, SimulatedCamera, RpiCamVidCamera
 from iot_servo_tracker.edge.runtime import EdgeRuntime
 from iot_servo_tracker.edge.sensors import RaspberryPiSensorReader, SimulatedSensorReader
@@ -27,6 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--simulated-camera", action="store_true")
     parser.add_argument("--hardware-servo", action="store_true")
     parser.add_argument("--direct-servo", action="store_true", help="Connect servos directly to RPi GPIO without PCA9685")
+    parser.add_argument("--native-pwm", action="store_true", help="Use zero-jitter sysfs hardware PWM")
     parser.add_argument("--hardware-sensors", action="store_true")
     return parser
 
@@ -45,6 +45,8 @@ def main(argv: list[str] | None = None) -> None:
     config = load_config(args.config)
     if args.hardware_servo:
         servo = Pca9685ServoDriver(config.control.pan, config.control.tilt)
+    elif args.native_pwm:
+        servo = NativeSysfsServoDriver(config.control.pan, config.control.tilt)
     elif args.direct_servo:
         servo = DirectGpioServoDriver(config.control.pan, config.control.tilt)
     else:
@@ -58,6 +60,8 @@ def run_edge(args: argparse.Namespace) -> None:
     config = load_config(args.config)
     if args.hardware_servo:
         servo = Pca9685ServoDriver(config.control.pan, config.control.tilt)
+    elif args.native_pwm:
+        servo = NativeSysfsServoDriver(config.control.pan, config.control.tilt)
     elif args.direct_servo:
         servo = DirectGpioServoDriver(config.control.pan, config.control.tilt)
     else:

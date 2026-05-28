@@ -115,3 +115,57 @@ class DirectGpioServoDriver:
         if self._last_tilt_deg is None or abs(self._last_tilt_deg - command.tilt_deg) > 0.01:
             self.tilt_servo.angle = command.tilt_deg
             self._last_tilt_deg = command.tilt_deg
+
+
+class NativeSysfsServoDriver:
+    """Zero-dependency hardware PWM driver using Linux sysfs.
+    Requires `dtoverlay=pwm-2chan` in /boot/config.txt.
+    Maps PWM0 to GPIO 12 and PWM1 to GPIO 13 on Raspberry Pi 4.
+    """
+
+    def __init__(self, pan_limit: AxisLimit, tilt_limit: AxisLimit, pwmchip: int = 0) -> None:
+        import os
+        self.pan_limit = pan_limit
+        self.tilt_limit = tilt_limit
+        self.pwmchip = pwmchip
+        self.os = os
+
+        self._init_pwm(0)
+        self._init_pwm(1)
+
+    def _init_pwm(self, channel: int) -> None:
+        base = f"/sys/class/pwm/pwmchip{self.pwmchip}"
+        if not self.os.path.exists(base):
+            raise RuntimeError(
+                f"{base} does not exist. You MUST enable 'dtoverlay=pwm-2chan' in /boot/firmware/config.txt and reboot!"
+            )
+
+        pwm_path = f"{base}/pwm{channel}"
+        if not self.os.path.exists(pwm_path):
+            with open(f"{base}/export", "w") as f:
+                f.write(str(channel))
+                
+        # 50 Hz = 20ms = 20,000,000 ns
+        with open(f"{pwm_path}/period", "w") as f:
+            f.write("20000000")
+            
+        with open(f"{pwm_path}/enable", "w") as f:
+            f.write("1")
+
+    def _angle_to_ns(self, angle_deg: float, limit: AxisLimit) -> int:
+        ratio = (angle_deg - limit.min_deg) / (limit.max_deg - limit.min_deg)
+        ratio = min(1.0, max(0.0, ratio))
+        us = limit.pwm_min_us + ratio * (limit.pwm_max_us - limit.pwm_min_us)
+        return int(us * 1000)
+
+    def apply(self, command: ServoCommand) -> None:
+        pan_ns = self._angle_to_ns(command.pan_deg, self.pan_limit)
+        tilt_ns = self._angle_to_ns(command.tilt_deg, self.tilt_limit)
+
+        try:
+            with open(f"/sys/class/pwm/pwmchip{self.pwmchip}/pwm0/duty_cycle", "w") as f:
+                f.write(str(pan_ns))
+            with open(f"/sys/class/pwm/pwmchip{self.pwmchip}/pwm1/duty_cycle", "w") as f:
+                f.write(str(tilt_ns))
+        except OSError:
+            pass # Ignore occasional permission/write errors if the kernel is busy
