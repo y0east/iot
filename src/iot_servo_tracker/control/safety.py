@@ -48,9 +48,6 @@ class SensorValidator:
             category = ValidationCategory.LIMIT_SWITCH
             reason = "limit switch is active"
             required_hits = 1
-        elif sensors_unavailable and self.config.pixel_jump_threshold < 900.0:
-            category = ValidationCategory.SENSOR_UNAVAILABLE
-            reason = "no distance sensor sample is available"
         elif bbox is None:
             if sensors_unavailable:
                 category = ValidationCategory.MISSING
@@ -58,6 +55,9 @@ class SensorValidator:
             else:
                 category = ValidationCategory.MISSING
                 reason = "vision result is missing"
+        elif sensors_unavailable and self.config.pixel_jump_threshold < 900.0:
+            category = ValidationCategory.SENSOR_UNAVAILABLE
+            reason = "no distance sensor sample is available"
         elif self.prev_bbox is not None and self.prev_sample is not None:
             pixel_jump = _pixel_jump(bbox, self.prev_bbox)
             tof_delta = _delta(sample.tof_mm, self.prev_sample.tof_mm)

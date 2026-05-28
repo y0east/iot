@@ -454,7 +454,12 @@ class WeDetectYoloPipeline:
         self.yolo_lost_count += 1
         self.yolo_suspect_count = 0
         if self.yolo_lost_count >= self.yolo_lost_frames:
-            return self._run_wedetect_redetection(frame_bytes, query, ts_req)
+            return self._run_wedetect_redetection(
+                frame_bytes,
+                query,
+                ts_req,
+                allow_reposition=True,
+            )
         return TrackingResult.empty(ts_req=ts_req, query=query)
 
     def _handle_suspect_yolo_candidate(
@@ -474,6 +479,7 @@ class WeDetectYoloPipeline:
         frame_bytes: bytes,
         query: str,
         ts_req: int,
+        allow_reposition: bool = False,
     ) -> TrackingResult:
         previous_bbox = self.locked_bbox
         self.last_inference_source = "wedetect"
@@ -486,6 +492,7 @@ class WeDetectYoloPipeline:
                 result.confidence,
                 result.track_id,
                 previous_bbox=previous_bbox,
+                allow_center_jump=allow_reposition,
             )
             if reason is None:
                 self.locked_bbox = result.bbox
@@ -506,6 +513,7 @@ class WeDetectYoloPipeline:
         confidence: float,
         track_id: int | None,
         previous_bbox: BBox | None = None,
+        allow_center_jump: bool = False,
     ) -> str | None:
         previous = previous_bbox or self.locked_bbox
         if confidence < self.confidence_threshold:
@@ -525,7 +533,7 @@ class WeDetectYoloPipeline:
             return "YOLO candidate bbox grew too much"
         if _aspect_ratio_change(bbox, previous) > self.yolo_max_aspect_ratio_change:
             return "YOLO candidate aspect ratio changed too much"
-        if _center_distance(bbox, previous) > self.yolo_max_center_jump_px:
+        if not allow_center_jump and _center_distance(bbox, previous) > self.yolo_max_center_jump_px:
             return "YOLO candidate center jumped too far"
         if (
             self.locked_track_id is not None
