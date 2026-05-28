@@ -49,8 +49,10 @@ class OpenCvCamera:
         self.thread = threading.Thread(target=self._capture_loop, daemon=True)
         self.thread.start()
 
-        # 첫 프레임이 들어올 때까지 잠시 대기
-        time.sleep(0.5)
+        # 첫 프레임이 들어올 때까지 대기 (최대 5초)
+        start_wait = time.time()
+        while self.latest_frame is None and time.time() - start_wait < 5.0:
+            time.sleep(0.1)
 
     def _capture_loop(self):
         import time
