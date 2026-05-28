@@ -128,20 +128,26 @@ class RpiCamVidCamera:
     def _capture_loop(self):
         buffer = b""
         while self.running and self.proc.poll() is None:
-            chunk = self.proc.stdout.read(4096)
+            chunk = self.proc.stdout.read1(65536)
             if not chunk:
                 break
             buffer += chunk
 
-            # Find JPEG start (0xff 0xd8) and end (0xff 0xd9)
-            start = buffer.find(b"\xff\xd8")
-            if start != -1:
+            # 밀려있는 프레임을 모두 찾아서 최신 프레임만 유지 (렉(Lag) 방지)
+            while True:
+                start = buffer.find(b"\xff\xd8")
+                if start == -1:
+                    # 쓰레기 데이터 정리
+                    if len(buffer) > 1024 * 1024:
+                        buffer = b""
+                    break
                 end = buffer.find(b"\xff\xd9", start)
-                if end != -1:
-                    frame = buffer[start : end + 2]
-                    with self.lock:
-                        self.latest_frame = frame
-                    buffer = buffer[end + 2 :]
+                if end == -1:
+                    break
+                
+                with self.lock:
+                    self.latest_frame = buffer[start : end + 2]
+                buffer = buffer[end + 2 :]
             
             # Prevent buffer from growing infinitely if stream is corrupted
             if len(buffer) > 2 * 1024 * 1024:
