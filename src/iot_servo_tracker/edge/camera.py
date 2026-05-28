@@ -104,6 +104,14 @@ class RpiCamVidCamera:
             "--inline",
             "-o", "-",
         ]
+        
+        # 최신 라즈베리파이 OS에서 sudo 권한으로 rpicam-vid를 실행하면 권한 충돌로 무한 대기에 빠집니다.
+        # 파이썬은 sudo로 실행하되, 카메라는 원래 사용자(jd) 권한으로 실행하도록 강제합니다.
+        import os
+        if os.geteuid() == 0:
+            sudo_user = os.environ.get("SUDO_USER", "jd")
+            cmd = ["sudo", "-u", sudo_user] + cmd
+
         try:
             self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         except FileNotFoundError as exc:
