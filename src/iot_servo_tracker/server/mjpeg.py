@@ -13,6 +13,7 @@ _LATEST_STREAM_JPEG: bytes | None = None
 _LATEST_BBOX: tuple[float, float, float, float] | None = None
 _LATEST_LABEL: str = ""
 _LATEST_FRAME_VERSION = 0
+_SMOOTH_CROP_BOX: tuple[float, float, float, float] | None = None
 
 
 class MJPEGStreamHandler(BaseHTTPRequestHandler):
@@ -122,8 +123,7 @@ def _annotate_frame_jpeg(
     bbox: tuple[float, float, float, float] | None,
     label: str = "",
 ) -> bytes:
-    if bbox is None:
-        return raw_jpeg
+    global _SMOOTH_CROP_BOX
     try:
         import cv2
         import numpy as np
@@ -134,18 +134,91 @@ def _annotate_frame_jpeg(
     frame = cv2.imdecode(array, cv2.IMREAD_COLOR)
     if frame is None:
         return raw_jpeg
-    x1, y1, x2, y2 = [max(0, int(v)) for v in bbox]
-    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 220, 0), 2)
-    if label:
-        cv2.putText(
-            frame,
-            label,
-            (x1, max(24, y1 - 8)),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.55,
-            (0, 220, 0),
-            2,
-            cv2.LINE_AA,
-        )
-    ok, encoded = cv2.imencode(".jpg", frame)
+
+    h, w = frame.shape[:2]
+    
+    # Target crop box calculation
+    if bbox is None:
+        # 줌아웃 타겟: 전체 화면
+        target_crop = (0.0, 0.0, float(w), float(h))
+    else:
+        x1, y1, x2, y2 = bbox
+        bw, bh = x2 - x1, y2 - y1
+        cx, cy = x1 + bw / 2.0, y1 + bh / 2.0
+        
+        # 1.5배 마진 (안정적인 뷰)
+        margin = 1.5
+        crop_w = bw * margin
+        crop_h = bh * margin
+        
+        # 화면 밖으로 나가지 않도록 조정, 너무 작아지지 않도록 최소 크기(원래 화면의 20%) 지정
+        crop_w = max(crop_w, w * 0.2)
+        crop_h = max(crop_h, h * 0.2)
+        
+        # 종횡비를 원본 해상도(w:h)와 맞춤
+        aspect_ratio = w / h
+        if crop_w / crop_h > aspect_ratio:
+            crop_h = crop_w / aspect_ratio
+        else:
+            crop_w = crop_h * aspect_ratio
+            
+        cx1 = max(0, min(w - crop_w, cx - crop_w / 2.0))
+        cy1 = max(0, min(h - crop_h, cy - crop_h / 2.0))
+        cx2 = min(w, cx1 + crop_w)
+        cy2 = min(h, cy1 + crop_h)
+        target_crop = (float(cx1), float(cy1), float(cx2), float(cy2))
+
+    # EMA 스무딩 적용 (알파값이 작을수록 부드러움)
+    alpha = 0.1
+    if _SMOOTH_CROP_BOX is None:
+        _SMOOTH_CROP_BOX = target_crop
+    else:
+        scx1, scy1, scx2, scy2 = _SMOOTH_CROP_BOX
+        tcx1, tcy1, tcx2, tcy2 = target_crop
+        
+        scx1 += (tcx1 - scx1) * alpha
+        scy1 += (tcy1 - scy1) * alpha
+        scx2 += (tcx2 - scx2) * alpha
+        scy2 += (tcy2 - scy2) * alpha
+        _SMOOTH_CROP_BOX = (scx1, scy1, scx2, scy2)
+
+    # 크롭 영역 정수로 변환
+    ix1, iy1, ix2, iy2 = [int(v) for v in _SMOOTH_CROP_BOX]
+    ix1, iy1 = max(0, ix1), max(0, iy1)
+    ix2, iy2 = min(w, ix2), min(h, iy2)
+    
+    # 줌 인/아웃 크롭 및 리사이즈
+    cropped_frame = frame[iy1:iy2, ix1:ix2]
+    if cropped_frame.size == 0:
+        cropped_frame = frame
+    else:
+        cropped_frame = cv2.resize(cropped_frame, (w, h), interpolation=cv2.INTER_LINEAR)
+
+    # BBox 그리기 (크롭된 화면 기준 좌표로 변환)
+    if bbox is not None:
+        scale_x = w / (ix2 - ix1)
+        scale_y = h / (iy2 - iy1)
+        bx1 = int((bbox[0] - ix1) * scale_x)
+        by1 = int((bbox[1] - iy1) * scale_y)
+        bx2 = int((bbox[2] - ix1) * scale_x)
+        by2 = int((bbox[3] - iy1) * scale_y)
+        
+        cv2.rectangle(cropped_frame, (bx1, by1), (bx2, by2), (0, 220, 0), 2)
+        if label:
+            cv2.putText(
+                cropped_frame,
+                label,
+                (bx1, max(24, by1 - 8)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (0, 220, 0),
+                2,
+                cv2.LINE_AA,
+            )
+
+    # 원본 이미지를 보여줘야 할 정도로 완전히 줌아웃 된 상태이고, bbox도 없으면 그대로 반환
+    if bbox is None and ix1 == 0 and iy1 == 0 and ix2 == w and iy2 == h:
+        return raw_jpeg
+
+    ok, encoded = cv2.imencode(".jpg", cropped_frame)
     return encoded.tobytes() if ok else raw_jpeg
