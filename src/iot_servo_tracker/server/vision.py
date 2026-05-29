@@ -805,7 +805,7 @@ class YoloePipeline:
         self.confidence_threshold = confidence_threshold
         self.active_query = ""
 
-    def process_frame(self, ts_req: int, query: str, frame_bytes: bytes) -> TrackingResult:
+    def process_frame(self, ts_req: int, query: str, frame_bytes: bytes, frame_index: int = 0) -> TrackingResult:
         if query and query != self.active_query:
             try:
                 self.yolo.set_classes([query])
