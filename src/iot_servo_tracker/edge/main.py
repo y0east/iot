@@ -98,14 +98,12 @@ def run_edge(args: argparse.Namespace) -> None:
             loop_s = time.monotonic()
             dt_s = _bounded_dt_s(loop_s - last_loop_s)
             last_loop_s = loop_s
-            control_dt_s = _bounded_dt_s(loop_s - last_control_s)
             ts_req = now_us()
             frame = camera.read_jpeg()
-            frame_sequence = getattr(camera, "last_read_sequence", getattr(camera, "frame_sequence", None))
             query, redetect = runtime.next_frame_request()
-            is_new_frame = frame_sequence is None or frame_sequence != last_sent_frame_sequence
-            fallback_due = frame_sequence is not None or (loop_s - last_frame_send_s) >= min_frame_interval_s
-            if is_new_frame and fallback_due:
+
+            # 카메라 프레임레이트(15FPS)에 맞춰 초당 15번만 전송하도록 제한 (TCP Bufferbloat 렉 방지)
+            if query and (loop_s - last_frame_send_s >= 0.066):
                 if transport.send_frame(
                     ts_req,
                     query,
@@ -114,10 +112,10 @@ def run_edge(args: argparse.Namespace) -> None:
                     redetect=redetect,
                 ):
                     frame_index += 1
-                last_sent_frame_sequence = frame_sequence
-                last_frame_send_s = loop_s
+                    last_frame_send_s = loop_s
             result = transport.recv_result(timeout_ms=1)
             sensor = _read_sensor_sample(sensors)
+            control_dt_s = _bounded_dt_s(loop_s - last_control_s)
             if result is not None:
                 last_status = runtime.handle_tracking_result(
                     result,
