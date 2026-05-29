@@ -29,6 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--direct-servo", action="store_true", help="Connect servos directly to RPi GPIO without PCA9685")
     parser.add_argument("--native-pwm", action="store_true", help="Use zero-jitter sysfs hardware PWM")
     parser.add_argument("--hardware-sensors", action="store_true")
+    parser.add_argument("--voice", action="store_true", help="Enable voice command NLU via microphone")
     return parser
 
 
@@ -81,8 +82,22 @@ def run_edge(args: argparse.Namespace) -> None:
     else:
         camera = OpenCvCamera(args.camera_index, config.camera.width, config.camera.height)
     sensors = RaspberryPiSensorReader() if args.hardware_sensors else SimulatedSensorReader()
-    bridge = MqttEdgeBridge(config.mqtt, runtime.handle_command)
-    bridge.start()
+    try:
+        bridge = MqttEdgeBridge(config.mqtt, runtime.handle_command)
+        bridge.start()
+    except Exception as e:
+        print(f"[Warning] Failed to connect to MQTT ({e}). Running without MQTT status reporting.")
+        bridge = None
+
+    voice_commander = None
+    if args.voice:
+        try:
+            from iot_servo_tracker.edge.audio import VoiceCommander
+            voice_commander = VoiceCommander(runtime.handle_command)
+            voice_commander.start()
+        except ImportError as e:
+            print(f"[Warning] Voice command dependencies missing: {e}")
+
     frame_index = 0
     last_status = runtime.last_status
     last_loop_s = time.monotonic()
@@ -140,17 +155,23 @@ def run_edge(args: argparse.Namespace) -> None:
                 last_status.message,
             )
             if (
-                loop_s - last_status_publish_s >= status_publish_interval_s
-                or status_event_key != last_status_event_key
+                bridge is not None and (
+                    loop_s - last_status_publish_s >= status_publish_interval_s
+                    or status_event_key != last_status_event_key
+                )
             ):
                 bridge.publish_status(last_status)
                 last_status_publish_s = loop_s
                 last_status_event_key = status_event_key
             time.sleep(0.01)
     except KeyboardInterrupt:
-        bridge.publish_status(runtime.handle_command(CommandPacket.create(CommandType.CENTER)))
+        if bridge is not None:
+            bridge.publish_status(runtime.handle_command(CommandPacket.create(CommandType.CENTER)))
     finally:
-        bridge.stop()
+        if bridge is not None:
+            bridge.stop()
+        if voice_commander is not None:
+            voice_commander.stop()
         transport.close()
         camera.close()
 
