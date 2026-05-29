@@ -21,6 +21,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--query", default="red cup")
     parser.add_argument("--serve", action="store_true", help="Run the ZMQ vision server loop")
     parser.add_argument("--production", action="store_true", help="Use WeDetect + YOLO pipeline")
+    parser.add_argument("--yoloe", action="store_true", help="Use YOLOE/YOLO-World open-vocabulary pipeline (bypasses WeDetect)")
     parser.add_argument("--wedetect-ref-module", default=None)
     parser.add_argument("--wedetect-ref-script", default=None)
     parser.add_argument("--wedetect-repo", default=None)
@@ -37,7 +38,14 @@ def main(argv: list[str] | None = None) -> None:
             script=args.wedetect_ref_script,
         )
     pipeline = None
-    if args.production:
+    if args.yoloe:
+        from iot_servo_tracker.server.vision import YoloePipeline
+        pipeline = YoloePipeline(
+            yolo_model=config.server.yolo_model,
+            tracker=config.server.tracker,
+            confidence_threshold=config.server.confidence_threshold,
+        )
+    elif args.production:
         wedetect_client = build_wedetect_client(config.server)
         preflight_production(wedetect_client)
         pipeline = WeDetectYoloPipeline(
