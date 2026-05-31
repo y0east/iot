@@ -236,6 +236,8 @@ class EdgeRuntime:
                 self.state_machine.apply(Event.TRACK_OK)
             elif validation.category == ValidationCategory.MISSING:
                 predicted = self.detections.predict_trajectory(now_us())
+                if predicted is None and self.last_valid_result is not None:
+                    predicted = self.last_valid_result.bbox
                 if predicted is not None:
                     command = self.controller.update(predicted, dt_s)
                     self.servo.apply(command)
