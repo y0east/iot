@@ -81,7 +81,7 @@ class DirectGpioServoDriver:
         pan_limit: AxisLimit,
         tilt_limit: AxisLimit,
         pan_pin: int = 12,
-        tilt_pin: int = 13,
+        tilt_pin: int = 19,
     ) -> None:
         try:
             from gpiozero import AngularServo
