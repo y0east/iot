@@ -6,7 +6,7 @@ import argparse
 import json
 import math
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Iterable
 
 from iot_servo_tracker.common.config import AppConfig, CameraConfig, load_config
@@ -147,6 +147,7 @@ def run_offline_simulation(
     options: SimulationOptions,
 ) -> list[SimulationEvent]:
     options = _with_scenario_defaults(options)
+    config = _with_simulation_safety_defaults(config, options)
     servo = SimulatedServoDriver()
     edge = EdgeRuntime(config=config, servo=servo)
     camera = SimulatedCamera()
@@ -286,6 +287,16 @@ def _with_scenario_defaults(options: SimulationOptions) -> SimulationOptions:
     if options.scenario == "sensor":
         return _replace_defaults(options, sensor_spike_start=45, sensor_spike_steps=15)
     raise ValueError(f"unknown simulation scenario: {options.scenario}")
+
+
+def _with_simulation_safety_defaults(config: AppConfig, options: SimulationOptions) -> AppConfig:
+    if options.scenario == "normal":
+        return config
+    required_frames = max(1, min(config.safety.consecutive_frames, 5))
+    return replace(
+        config,
+        safety=replace(config.safety, consecutive_frames=required_frames),
+    )
 
 
 def _replace_defaults(options: SimulationOptions, **defaults) -> SimulationOptions:

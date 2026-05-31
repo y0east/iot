@@ -35,7 +35,7 @@ wedetect_ref_module = "iot_servo_tracker.server.wedetect_ref_runtime:detect"
 wedetect_ref_script = ""
 wedetect_device = "cuda:0"
 # About 2.5 seconds at 12 FPS; avoids expensive redetection on brief tracker gaps.
-yolo_lost_frames = 12
+yolo_lost_frames = 30
 yolo_suspect_frames = 5
 yolo_max_center_jump_px = 320.0
 yolo_max_area_growth_ratio = 16.0

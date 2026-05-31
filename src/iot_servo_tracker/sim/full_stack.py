@@ -242,6 +242,7 @@ def run_full_stack_simulation(
     options: FullStackSimulationOptions,
 ) -> list[FullStackEvent]:
     options = _with_scenario_defaults(options)
+    config = _with_simulation_safety_defaults(config, options)
     mqtt_bus = InMemoryMqttBus()
     topics = MqttTopics.from_config(config.mqtt)
     edge = EdgeRuntime(config=config, servo=SimulatedServoDriver())
@@ -458,6 +459,19 @@ def _set_if_default(data: dict, key: str, value) -> None:
             data[key] = value
     elif data[key] in {0, None}:
         data[key] = value
+
+
+def _with_simulation_safety_defaults(
+    config: AppConfig,
+    options: FullStackSimulationOptions,
+) -> AppConfig:
+    if options.scenario == "normal":
+        return config
+    required_frames = max(1, min(config.safety.consecutive_frames, 5))
+    return replace(
+        config,
+        safety=replace(config.safety, consecutive_frames=required_frames),
+    )
 
 
 def _build_camera(config: AppConfig, options: FullStackSimulationOptions):

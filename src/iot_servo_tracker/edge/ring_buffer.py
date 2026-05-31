@@ -60,22 +60,18 @@ class DetectionHistory:
 
         # 1. Update Velocity EMA using raw coordinates
         if self.raw_last_bbox is not None and dt > 0:
-            if dt > 0.2:
-                # Gap is too large. Reset velocity to prevent dragging stale speed.
-                self.ema_vx = 0.0
-                self.ema_vy = 0.0
+            raw_vx = (result.bbox.center[0] - self.raw_last_bbox.center[0]) / dt
+            raw_vy = (result.bbox.center[1] - self.raw_last_bbox.center[1]) / dt
+
+            # Time-aware EMA for velocity (tau = 0.08s, gives ~0.33 alpha at 30fps).
+            # Long gaps should trust the newest observed motion instead of coasting stale speed.
+            v_alpha = 1.0 if dt > 0.2 else 1.0 - math.exp(-dt / 0.08)
+            if self.ema_vx == 0.0 and self.ema_vy == 0.0:
+                self.ema_vx = raw_vx
+                self.ema_vy = raw_vy
             else:
-                raw_vx = (result.bbox.center[0] - self.raw_last_bbox.center[0]) / dt
-                raw_vy = (result.bbox.center[1] - self.raw_last_bbox.center[1]) / dt
-                
-                # Time-aware EMA for velocity (tau = 0.08s, gives ~0.33 alpha at 30fps)
-                v_alpha = 1.0 - math.exp(-dt / 0.08)
-                if self.ema_vx == 0.0 and self.ema_vy == 0.0:
-                    self.ema_vx = raw_vx
-                    self.ema_vy = raw_vy
-                else:
-                    self.ema_vx = self.ema_vx * (1.0 - v_alpha) + raw_vx * v_alpha
-                    self.ema_vy = self.ema_vy * (1.0 - v_alpha) + raw_vy * v_alpha
+                self.ema_vx = self.ema_vx * (1.0 - v_alpha) + raw_vx * v_alpha
+                self.ema_vy = self.ema_vy * (1.0 - v_alpha) + raw_vy * v_alpha
 
         # 2. Update Coordinate EMA
         if self.ema_bbox is None or self.raw_last_bbox is None or dt > 0.2:
@@ -120,8 +116,6 @@ class DetectionHistory:
         prev = self.results[-2]
         if prev.bbox is None or latest.bbox is None:
             return latest.bbox
-        dx = latest.bbox.center[0] - prev.bbox.center[0]
-        dy = latest.bbox.center[1] - prev.bbox.center[1]
         vx, vy = self._estimate_velocity()
         delay_s = max((now_us - result.ts_req) / 1_000_000.0, 0.0)
         return latest.bbox.shifted(vx * delay_s, vy * delay_s)

@@ -67,7 +67,6 @@ class SensorValidator:
             if bbox_absorption_reason is not None:
                 category = ValidationCategory.BBOX_ABSORPTION
                 reason = bbox_absorption_reason
-                required_hits = 3
             elif (
                 pixel_jump > self.config.pixel_jump_threshold
                 and tof_delta is not None
@@ -75,33 +74,33 @@ class SensorValidator:
             ):
                 category = ValidationCategory.SIMILAR_TARGET
                 reason = "vision center jumped but ToF distance barely changed"
-                required_hits = 5
-                if not self._is_central(bbox):
-                    required_hits += 5
             elif (
                 ultrasonic_drop is not None
                 and ultrasonic_drop > self.config.ultrasonic_jump_threshold_mm
             ):
                 category = ValidationCategory.OCCLUSION
                 reason = "ultrasonic distance dropped abruptly"
-                required_hits = 3
         if category in {
             ValidationCategory.MISSING,
             ValidationCategory.SIMILAR_TARGET,
             ValidationCategory.BBOX_ABSORPTION,
             ValidationCategory.OCCLUSION,
+            ValidationCategory.SENSOR_UNAVAILABLE,
             ValidationCategory.LIMIT_SWITCH,
         }:
             self._hit_count += 1
         else:
             self._hit_count = 0
 
-        if category in {ValidationCategory.OK, ValidationCategory.SENSOR_UNAVAILABLE}:
+        safe_hold = self._hit_count >= required_hits
+        if category is ValidationCategory.OK or (
+            category is ValidationCategory.SENSOR_UNAVAILABLE and not safe_hold
+        ):
             self.prev_bbox = bbox
             self.prev_sample = sample
         return ValidationResult(
             category=category,
-            safe_hold=self._hit_count >= required_hits,
+            safe_hold=safe_hold,
             consecutive_hits=self._hit_count,
             reason=reason,
         )
