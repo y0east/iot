@@ -235,11 +235,12 @@ class EdgeRuntime:
                 )
                 self.state_machine.apply(Event.TRACK_OK)
             elif validation.category == ValidationCategory.MISSING:
-                command = self.controller.soft_stop(dt_s)
-                self.servo.apply(command)
-                self.last_command = command
-                self.is_predicting = False
-                self.predicted_bbox = None
+                if self.last_valid_result is not None and self.last_valid_result.bbox is not None:
+                    command = self.controller.update(self.last_valid_result.bbox, dt_s)
+                    self.servo.apply(command)
+                    self.last_command = command
+                    self.is_predicting = True
+                    self.predicted_bbox = self.last_valid_result.bbox
                 self.state_machine.apply(Event.TRACK_OK)
         elif self.state == SystemState.SAFE_HOLD:
             command = self.controller.soft_stop(dt_s)
