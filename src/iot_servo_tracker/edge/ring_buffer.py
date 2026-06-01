@@ -101,24 +101,11 @@ class DetectionHistory:
         )
         self.results.append(smoothed_result)
 
-    def estimate_current(self, result: TrackingResult, now_us: int) -> BBox | None:
-        """Approximate current bbox using the last two valid detections."""
-
-        if result.bbox is None:
-            return None
-        if not self.results:
-            return result.bbox
-
-        latest = self.results[-1]
-        if len(self.results) < 2:
-            return latest.bbox
-            
-        prev = self.results[-2]
-        if prev.bbox is None or latest.bbox is None:
-            return latest.bbox
-        vx, vy = self._estimate_velocity()
-        delay_s = max((now_us - result.ts_req) / 1_000_000.0, 0.0)
-        return latest.bbox.shifted(vx * delay_s, vy * delay_s)
+    def estimate_current(self, latest: TrackingResult, now_us: int) -> BBox | None:
+        # Returning the EMA-smoothed latest box directly.
+        # Pixel-velocity prediction is disabled because it is heavily contaminated
+        # by the camera's own movement, which causes severe positive-feedback oscillation.
+        return latest.bbox
 
     def _estimate_velocity(self) -> tuple[float, float]:
         """Return the exponential moving average (EMA) of velocity to prevent sudden direction change overshoots."""
