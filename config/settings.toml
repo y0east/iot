@@ -37,14 +37,14 @@ wedetect_device = "cuda:0"
 # About 2.5 seconds at 12 FPS; avoids expensive redetection on brief tracker gaps.
 yolo_lost_frames = 30
 yolo_suspect_frames = 30
-yolo_max_center_jump_px = 320.0
+yolo_max_center_jump_px = 160.0
 yolo_max_area_growth_ratio = 16.0
 yolo_max_frame_area_ratio = 0.85
 yolo_max_aspect_ratio_change = 8.0
 yolo_min_iou_on_id_change = 0.0
 yolo_model = "yoloe-26m-seg.pt"
 tracker = "bytetrack.yaml"
-confidence_threshold = 0.35
+confidence_threshold = 0.15
 wedetect_confidence_threshold = 0.10
 
 [camera]
