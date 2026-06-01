@@ -65,6 +65,10 @@ class PDServoController:
     def update(self, bbox: BBox, dt_s: float) -> ServoCommand:
         dt_s = max(dt_s, 1e-3)
         yaw_error, pitch_error = pixel_error_to_angle_deg(bbox, self.config.camera)
+        return self.update_from_angle(yaw_error, pitch_error, dt_s)
+
+    def update_from_angle(self, yaw_error: float, pitch_error: float, dt_s: float) -> ServoCommand:
+        dt_s = max(dt_s, 1e-3)
 
         pan_cmd = self._axis_omega(
             error=yaw_error,
