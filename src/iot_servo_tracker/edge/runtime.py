@@ -243,7 +243,14 @@ class EdgeRuntime:
                 )
                 self.state_machine.apply(Event.TRACK_OK)
             elif validation.category == ValidationCategory.MISSING:
-                if self.locked_target_pan is not None and self.locked_target_tilt is not None:
+                predicted = self.detections.predict_trajectory(now_us())
+                if predicted is not None:
+                    command = self.controller.update(predicted, dt_s)
+                    self.servo.apply(command)
+                    self.last_command = command
+                    self.is_predicting = True
+                    self.predicted_bbox = predicted
+                elif self.locked_target_pan is not None and self.locked_target_tilt is not None:
                     command = self.controller.drive_to_absolute(self.locked_target_pan, self.locked_target_tilt, dt_s)
                     self.servo.apply(command)
                     self.last_command = command
