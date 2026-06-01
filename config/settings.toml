@@ -55,10 +55,10 @@ vertical_fov_deg = 48.0
 
 [control]
 deadband_deg = 0.8
-max_speed_deg_s = 25.0
-max_accel_deg_s2 = 80.0
+max_speed_deg_s = 35.0
+max_accel_deg_s2 = 100.0
 derivative_filter_gamma = 0.65
-pan_kp = 1.4
+pan_kp = 2.0
 pan_kd = 0.05
 tilt_kp = 1.1
 tilt_kd = 0.04
