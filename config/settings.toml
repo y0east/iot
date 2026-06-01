@@ -1,0 +1,103 @@
+[mqtt]
+# 127.0.0.1 is only for single-PC simulation. For Raspberry Pi + RTX split
+# deployment, set this to the MQTT broker IP reachable from both machines.
+host = "192.168.137.1"
+port = 1883
+command_topic = "iot_servo_tracker/command"
+status_topic = "iot_servo_tracker/status"
+
+[zmq]
+frame_bind_endpoint = "tcp://0.0.0.0:5555"
+result_bind_endpoint = "tcp://0.0.0.0:5556"
+# 127.0.0.1 is only for single-PC simulation. On the Raspberry Pi, replace
+# these with the RTX server IP, for example tcp://192.168.0.20:5555.
+frame_connect_endpoint = "tcp://192.168.137.1:5555"
+result_connect_endpoint = "tcp://192.168.137.1:5556"
+frame_snd_hwm = 1
+frame_rcv_hwm = 1
+result_snd_hwm = 1
+result_rcv_hwm = 1
+
+[web]
+processed_stream_url = "http://127.0.0.1:8000/stream.mjpg"
+
+[server]
+# WeDetect-Ref is downloaded from Hugging Face and executed locally.
+wedetect_ref_repo_id = "fushh7/WeDetect-Ref-2B"
+wedetect_uni_repo_id = "fushh7/WeDetect"
+wedetect_uni_filename = "wedetect_base_uni.pth"
+wedetect_cache_dir = ""
+wedetect_ref_model_dir = ""
+wedetect_uni_checkpoint = ""
+# Requires WEDETECT_REPO or --wedetect-repo to point at a cloned
+# https://github.com/WeChatCV/WeDetect repository before production startup.
+wedetect_ref_module = "iot_servo_tracker.server.wedetect_ref_runtime:detect"
+wedetect_ref_script = ""
+wedetect_device = "cuda:0"
+# About 2.5 seconds at 12 FPS; avoids expensive redetection on brief tracker gaps.
+yolo_lost_frames = 30
+yolo_suspect_frames = 30
+yolo_max_center_jump_px = 320.0
+yolo_max_area_growth_ratio = 16.0
+yolo_max_frame_area_ratio = 0.85
+yolo_max_aspect_ratio_change = 8.0
+yolo_min_iou_on_id_change = 0.0
+yolo_model = "yoloe-26m-seg.pt"
+tracker = "bytetrack.yaml"
+confidence_threshold = 0.15
+wedetect_confidence_threshold = 0.10
+
+[camera]
+width = 640
+height = 480
+horizontal_fov_deg = 62.0
+vertical_fov_deg = 48.0
+
+[control]
+deadband_deg = 0.8
+max_speed_deg_s = 25.0
+max_accel_deg_s2 = 80.0
+derivative_filter_gamma = 0.65
+pan_kp = 1.4
+pan_kd = 0.05
+tilt_kp = 1.1
+tilt_kd = 0.04
+
+[control.pan]
+min_deg = -45.0
+max_deg = 45.0
+center_deg = 0.0
+pwm_min_us = 1000
+pwm_max_us = 2000
+
+[control.tilt]
+min_deg = -10.0
+max_deg = 45.0
+center_deg = 45.0
+pwm_min_us = 1000
+pwm_max_us = 2000
+
+[safety]
+pixel_jump_threshold = 180.0
+tof_delta_threshold_mm = 40.0
+ultrasonic_jump_threshold_mm = 120.0
+bbox_area_growth_threshold = 16.0
+bbox_frame_area_threshold = 0.85
+bbox_aspect_ratio_change_threshold = 8.0
+consecutive_frames = 45
+recovery_confirm_frames = 3
+default_ping_threshold_ms = 250.0
+timeout_min_s = 3.5
+timeout_max_s = 5.0
+safe_hold_rescan_delay_s = 2.5
+limited_rescan_range_deg = 10.0
+central_region_ratio = 0.60
+
+[scan]
+range_deg = 45.0
+speed_deg_s = 10.0
+confidence_threshold = 0.15
+confirmation_frames = 1
+passes = 2
+max_center_distance_ratio = 0.45
+min_box_area_ratio = 0.002
