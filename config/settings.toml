@@ -73,9 +73,9 @@ pwm_max_us = 2000
 [control.tilt]
 min_deg = -10.0
 max_deg = 45.0
-center_deg = 0.0
-pwm_min_us = 1000
-pwm_max_us = 2000
+center_deg = 45.0
+pwm_min_us = 2000
+pwm_max_us = 1000
 
 [safety]
 pixel_jump_threshold = 180.0
