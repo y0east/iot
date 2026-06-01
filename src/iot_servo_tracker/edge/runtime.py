@@ -62,6 +62,9 @@ class EdgeRuntime:
     predicted_bbox: BBox | None = None
     locked_target_pan: float | None = None
     locked_target_tilt: float | None = None
+    locked_target_pan_vel: float = 0.0
+    locked_target_tilt_vel: float = 0.0
+    locked_target_ts: int = 0
     _lock: RLock = field(default_factory=RLock, repr=False)
 
     def __post_init__(self) -> None:
@@ -227,10 +230,26 @@ class EdgeRuntime:
                 self.servo.apply(command)
                 self.last_command = command
                 
-                from iot_servo_tracker.control.geometry import pixel_error_to_angle_deg
+                from iot_servo_tracker.control.geometry import pixel_error_to_angle_deg, clamp
                 yaw_err, pitch_err = pixel_error_to_angle_deg(corrected_bbox, self.config.camera)
-                self.locked_target_pan = self.controller.state.pan_deg + yaw_err
-                self.locked_target_tilt = self.controller.state.tilt_deg + pitch_err
+                
+                current_target_pan = self.controller.state.pan_deg + yaw_err
+                current_target_tilt = self.controller.state.tilt_deg + pitch_err
+                
+                if self.locked_target_pan is not None and self.locked_target_ts > 0:
+                    dt = (now_us() - self.locked_target_ts) / 1_000_000.0
+                    if dt > 0:
+                        alpha = 0.5
+                        new_pan_vel = (current_target_pan - self.locked_target_pan) / dt
+                        new_tilt_vel = (current_target_tilt - self.locked_target_tilt) / dt
+                        self.locked_target_pan_vel = self.locked_target_pan_vel * (1 - alpha) + new_pan_vel * alpha
+                        self.locked_target_tilt_vel = self.locked_target_tilt_vel * (1 - alpha) + new_tilt_vel * alpha
+                        self.locked_target_pan_vel = clamp(self.locked_target_pan_vel, -45.0, 45.0)
+                        self.locked_target_tilt_vel = clamp(self.locked_target_tilt_vel, -45.0, 45.0)
+
+                self.locked_target_pan = current_target_pan
+                self.locked_target_tilt = current_target_tilt
+                self.locked_target_ts = now_us()
 
                 self.last_valid_result = TrackingResult(
                     packet=result.packet,
@@ -244,8 +263,14 @@ class EdgeRuntime:
                 self.state_machine.apply(Event.TRACK_OK)
             elif validation.category == ValidationCategory.MISSING:
                 if self.locked_target_pan is not None and self.locked_target_tilt is not None:
-                    yaw_error = self.locked_target_pan - self.controller.state.pan_deg
-                    pitch_error = self.locked_target_tilt - self.controller.state.tilt_deg
+                    dt = (now_us() - self.locked_target_ts) / 1_000_000.0
+                    dt = min(dt, 2.0)
+                    
+                    predicted_pan = self.locked_target_pan + self.locked_target_pan_vel * dt
+                    predicted_tilt = self.locked_target_tilt + self.locked_target_tilt_vel * dt
+                    
+                    yaw_error = predicted_pan - self.controller.state.pan_deg
+                    pitch_error = predicted_tilt - self.controller.state.tilt_deg
                     command = self.controller.update_from_angle(yaw_error, pitch_error, dt_s)
                     self.servo.apply(command)
                     self.last_command = command
