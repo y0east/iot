@@ -62,9 +62,16 @@ class PDServoController:
         self.state.filtered_yaw_derivative = 0.0
         self.state.filtered_pitch_derivative = 0.0
 
+    def control_errors_from_bbox(self, bbox: BBox) -> tuple[float, float]:
+        yaw_error, pitch_error = pixel_error_to_angle_deg(bbox, self.config.camera)
+        return (
+            yaw_error * self.config.control.pan_error_sign,
+            pitch_error * self.config.control.tilt_error_sign,
+        )
+
     def update(self, bbox: BBox, dt_s: float) -> ServoCommand:
         dt_s = max(dt_s, 1e-3)
-        yaw_error, pitch_error = pixel_error_to_angle_deg(bbox, self.config.camera)
+        yaw_error, pitch_error = self.control_errors_from_bbox(bbox)
         return self.update_from_angle(yaw_error, pitch_error, dt_s)
 
     def update_from_angle(self, yaw_error: float, pitch_error: float, dt_s: float) -> ServoCommand:

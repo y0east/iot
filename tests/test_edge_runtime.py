@@ -1,7 +1,7 @@
 import time
 import unittest
 
-from iot_servo_tracker.common.config import AppConfig, SafetyConfig, ScanConfig
+from iot_servo_tracker.common.config import AppConfig, ControlConfig, SafetyConfig, ScanConfig
 from iot_servo_tracker.common.packets import BBox, CommandPacket, CommandType, SensorSample, TrackingResult
 from iot_servo_tracker.common.timebase import now_us
 from iot_servo_tracker.control.states import Event, SystemState
@@ -69,6 +69,19 @@ class EdgeRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(runtime.controller.max_speed_deg_s, 5)
 
+    def test_stop_command_holds_without_centering(self) -> None:
+        runtime = EdgeRuntime(AppConfig())
+        runtime.state_machine.state = SystemState.TRACKING
+        runtime.controller.state.pan_deg = 20.0
+        runtime.controller.state.tilt_deg = 10.0
+
+        status = runtime.handle_command(CommandPacket.create(CommandType.STOP))
+
+        self.assertTrue(status.ack)
+        self.assertEqual(runtime.state, SystemState.IDLE)
+        self.assertEqual(runtime.current_query, "")
+        self.assertNotEqual(runtime.last_command.pan_deg, runtime.config.control.pan.center_deg)
+
     def test_scan_requires_consecutive_initial_detections(self) -> None:
         config = AppConfig(scan=ScanConfig(confirmation_frames=3))
         runtime = EdgeRuntime(config)
@@ -112,6 +125,80 @@ class EdgeRuntimeTests(unittest.TestCase):
         )
         runtime.handle_tracking_result(result, sensor_sample())
         self.assertEqual(runtime.state, SystemState.SCAN)
+
+    def test_scan_accepts_small_but_valid_center_candidate(self) -> None:
+        config = AppConfig(scan=ScanConfig(confirmation_frames=1))
+        runtime = EdgeRuntime(config)
+        runtime.handle_command(CommandPacket.create(CommandType.TRACK, query="red cup"))
+
+        runtime.handle_tracking_result(
+            TrackingResult(
+                packet="tracking_result",
+                ts_req=now_us(),
+                ts_resp=now_us(),
+                bbox=BBox(310, 230, 330, 250),
+                confidence=0.9,
+                track_id=7,
+                query="red cup",
+            ),
+            sensor_sample(),
+        )
+
+        self.assertEqual(runtime.state, SystemState.TRACKING)
+
+    def test_pan_error_sign_can_be_reversed_for_mirrored_servo_mount(self) -> None:
+        config = AppConfig(control=ControlConfig(pan_error_sign=-1.0))
+        runtime = EdgeRuntime(config)
+        runtime.state_machine.state = SystemState.TRACKING
+
+        runtime.handle_tracking_result(
+            TrackingResult(
+                packet="tracking_result",
+                ts_req=now_us(),
+                ts_resp=now_us(),
+                bbox=BBox(500, 220, 560, 280),
+                confidence=0.9,
+                track_id=7,
+                query="red cup",
+            ),
+            sensor_sample(),
+        )
+
+        self.assertLess(runtime.last_command.pan_omega_deg_s, 0.0)
+
+    def test_tracking_does_not_chase_suddenly_tiny_bbox(self) -> None:
+        config = AppConfig(safety=SafetyConfig(bbox_area_shrink_threshold=0.25))
+        runtime = EdgeRuntime(config)
+        runtime.state_machine.state = SystemState.TRACKING
+        runtime.handle_tracking_result(
+            TrackingResult(
+                packet="tracking_result",
+                ts_req=now_us(),
+                ts_resp=now_us(),
+                bbox=BBox(260, 180, 380, 300),
+                confidence=0.9,
+                track_id=7,
+                query="red cup",
+            ),
+            sensor_sample(),
+        )
+        before = runtime.last_command
+
+        status = runtime.handle_tracking_result(
+            TrackingResult(
+                packet="tracking_result",
+                ts_req=now_us(),
+                ts_resp=now_us(),
+                bbox=BBox(500, 220, 515, 235),
+                confidence=0.9,
+                track_id=7,
+                query="red cup",
+            ),
+            sensor_sample(),
+        )
+
+        self.assertEqual(status.message, "vision bbox shrank too much between frames")
+        self.assertLessEqual(abs(runtime.last_command.pan_omega_deg_s), abs(before.pan_omega_deg_s))
 
     def test_stale_tracking_result_is_ignored(self) -> None:
         runtime = EdgeRuntime(AppConfig())

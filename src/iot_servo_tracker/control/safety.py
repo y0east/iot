@@ -127,6 +127,8 @@ class SensorValidator:
             area_growth = bbox.area / previous.area
             if area_growth > self.config.bbox_area_growth_threshold:
                 return "vision bbox grew too much between frames"
+            if area_growth < self.config.bbox_area_shrink_threshold:
+                return "vision bbox shrank too much between frames"
 
         aspect_change = _aspect_ratio_change(bbox, previous)
         if aspect_change > self.config.bbox_aspect_ratio_change_threshold:

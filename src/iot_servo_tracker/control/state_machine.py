@@ -29,8 +29,10 @@ class StateMachine:
 
     @staticmethod
     def _next(state: SystemState, event: Event) -> tuple[SystemState, str]:
-        if event in {Event.STOP_COMMAND, Event.CENTER_COMMAND}:
-            return SystemState.CENTERING, "operator requested stop or center"
+        if event == Event.STOP_COMMAND:
+            return SystemState.IDLE, "operator requested stop"
+        if event == Event.CENTER_COMMAND:
+            return SystemState.CENTERING, "operator requested center"
         if event == Event.CALIBRATION_ERROR:
             return SystemState.ERROR, "calibration or limit switch error"
         if event == Event.TRACK_COMMAND and state != SystemState.ERROR:

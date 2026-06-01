@@ -16,7 +16,7 @@ class StateMachineTests(unittest.TestCase):
 
     def test_stop_overrides_any_state(self) -> None:
         machine = StateMachine(SystemState.TRACKING)
-        self.assertEqual(machine.apply(Event.STOP_COMMAND).current, SystemState.CENTERING)
+        self.assertEqual(machine.apply(Event.STOP_COMMAND).current, SystemState.IDLE)
 
     def test_track_command_restarts_from_safe_hold(self) -> None:
         machine = StateMachine(SystemState.SAFE_HOLD)

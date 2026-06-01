@@ -31,6 +31,8 @@ class ControlConfig:
     max_speed_deg_s: float = 35.0
     max_accel_deg_s2: float = 120.0
     derivative_filter_gamma: float = 0.65
+    pan_error_sign: float = 1.0
+    tilt_error_sign: float = 1.0
     pan_kp: float = 1.4
     pan_kd: float = 0.05
     tilt_kp: float = 1.1
@@ -45,6 +47,7 @@ class SafetyConfig:
     tof_delta_threshold_mm: float = 40.0
     ultrasonic_jump_threshold_mm: float = 120.0
     bbox_area_growth_threshold: float = 16.0
+    bbox_area_shrink_threshold: float = 0.10
     bbox_frame_area_threshold: float = 0.85
     bbox_aspect_ratio_change_threshold: float = 8.0
     consecutive_frames: int = 45
@@ -65,7 +68,7 @@ class ScanConfig:
     confirmation_frames: int = 3
     passes: int = 2
     max_center_distance_ratio: float = 0.45
-    min_box_area_ratio: float = 0.002
+    min_box_area_ratio: float = 0.0005
 
 
 @dataclass(frozen=True)
@@ -156,6 +159,8 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         derivative_filter_gamma=control_raw.get(
             "derivative_filter_gamma", default_control.derivative_filter_gamma
         ),
+        pan_error_sign=control_raw.get("pan_error_sign", default_control.pan_error_sign),
+        tilt_error_sign=control_raw.get("tilt_error_sign", default_control.tilt_error_sign),
         pan_kp=control_raw.get("pan_kp", default_control.pan_kp),
         pan_kd=control_raw.get("pan_kd", default_control.pan_kd),
         tilt_kp=control_raw.get("tilt_kp", default_control.tilt_kp),

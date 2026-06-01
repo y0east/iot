@@ -103,6 +103,7 @@ class EdgeRuntime:
             self.current_query = ""
             self.controller.set_max_speed_limit(None)
             self.state_machine.apply(Event.STOP_COMMAND)
+            self._safe_stop_step_unlocked()
         elif command.cmd_type == CommandType.CENTER:
             self.current_cmd_id = command.cmd_id
             self.current_query = ""
@@ -208,8 +209,7 @@ class EdgeRuntime:
                 # If we lose the bbox in the very next frame, we must have a valid absolute coordinate to fallback on,
                 # otherwise we will violently swing towards a stale target from the previous tracking session.
                 if result.bbox is not None:
-                    from iot_servo_tracker.control.geometry import pixel_error_to_angle_deg
-                    yaw_err, pitch_err = pixel_error_to_angle_deg(result.bbox, self.config.camera)
+                    yaw_err, pitch_err = self.controller.control_errors_from_bbox(result.bbox)
                     self.locked_target_pan = self.controller.state.pan_deg + yaw_err
                     self.locked_target_tilt = self.controller.state.tilt_deg + pitch_err
                     
@@ -232,13 +232,17 @@ class EdgeRuntime:
             if validation.safe_hold:
                 self._enter_safe_hold()
                 self.state_machine.apply(Event.SENSOR_ANOMALY)
+            elif validation.category not in {ValidationCategory.OK, ValidationCategory.MISSING}:
+                command = self.controller.soft_stop(dt_s)
+                self.servo.apply(command)
+                self.last_command = command
+                self.state_machine.apply(Event.TRACK_OK)
             elif corrected_bbox is not None:
                 command = self.controller.update(corrected_bbox, dt_s)
                 self.servo.apply(command)
                 self.last_command = command
                 
-                from iot_servo_tracker.control.geometry import pixel_error_to_angle_deg
-                yaw_err, pitch_err = pixel_error_to_angle_deg(corrected_bbox, self.config.camera)
+                yaw_err, pitch_err = self.controller.control_errors_from_bbox(corrected_bbox)
                 self.locked_target_pan = self.controller.state.pan_deg + yaw_err
                 self.locked_target_tilt = self.controller.state.tilt_deg + pitch_err
 
@@ -372,6 +376,8 @@ class EdgeRuntime:
         self.recovery_confirm_count = 0
         self.is_predicting = False
         self.predicted_bbox = None
+        self.locked_target_pan = None
+        self.locked_target_tilt = None
 
     def _begin_scan(self, scan_range_deg: float) -> None:
         limit = min(abs(scan_range_deg), self.config.scan.range_deg)
