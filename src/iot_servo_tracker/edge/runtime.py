@@ -60,6 +60,8 @@ class EdgeRuntime:
     last_command: ServoCommand | None = None
     is_predicting: bool = False
     predicted_bbox: BBox | None = None
+    locked_target_pan: float | None = None
+    locked_target_tilt: float | None = None
     _lock: RLock = field(default_factory=RLock, repr=False)
 
     def __post_init__(self) -> None:
@@ -224,6 +226,12 @@ class EdgeRuntime:
                 command = self.controller.update(corrected_bbox, dt_s)
                 self.servo.apply(command)
                 self.last_command = command
+                
+                from iot_servo_tracker.control.geometry import pixel_error_to_angle_deg
+                yaw_err, pitch_err = pixel_error_to_angle_deg(corrected_bbox, self.config.camera)
+                self.locked_target_pan = self.controller.state.pan_deg + yaw_err
+                self.locked_target_tilt = self.controller.state.tilt_deg + pitch_err
+
                 self.last_valid_result = TrackingResult(
                     packet=result.packet,
                     ts_req=result.ts_req,
@@ -235,12 +243,12 @@ class EdgeRuntime:
                 )
                 self.state_machine.apply(Event.TRACK_OK)
             elif validation.category == ValidationCategory.MISSING:
-                if self.last_valid_result is not None and self.last_valid_result.bbox is not None:
-                    command = self.controller.update(self.last_valid_result.bbox, dt_s)
+                if self.locked_target_pan is not None and self.locked_target_tilt is not None:
+                    command = self.controller.drive_to_absolute(self.locked_target_pan, self.locked_target_tilt, dt_s)
                     self.servo.apply(command)
                     self.last_command = command
                     self.is_predicting = True
-                    self.predicted_bbox = self.last_valid_result.bbox
+                    self.predicted_bbox = None
                 self.state_machine.apply(Event.TRACK_OK)
         elif self.state == SystemState.SAFE_HOLD:
             command = self.controller.soft_stop(dt_s)

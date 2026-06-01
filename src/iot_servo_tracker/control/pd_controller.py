@@ -130,6 +130,21 @@ class PDServoController:
             self.state.tilt_omega_deg_s = 0.0
         return self._command()
 
+    def drive_to_absolute(self, target_pan_deg: float, target_tilt_deg: float, dt_s: float) -> ServoCommand:
+        self.soft_stop(dt_s)
+        max_delta = self.max_speed_deg_s * max(dt_s, 1e-3)
+        self.state.pan_deg = move_toward(
+            self.state.pan_deg, target_pan_deg, max_delta
+        )
+        self.state.tilt_deg = move_toward(
+            self.state.tilt_deg, target_tilt_deg, max_delta
+        )
+        if self.state.pan_deg == target_pan_deg:
+            self.state.pan_omega_deg_s = 0.0
+        if self.state.tilt_deg == target_tilt_deg:
+            self.state.tilt_omega_deg_s = 0.0
+        return self._command()
+
     def is_centered(self, tolerance_deg: float = 0.5) -> bool:
         return (
             abs(self.state.pan_deg - self.config.control.pan.center_deg) <= tolerance_deg
