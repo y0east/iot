@@ -77,8 +77,8 @@ class DetectionHistory:
         if self.ema_bbox is None or self.raw_last_bbox is None or dt > 0.2:
             self.ema_bbox = result.bbox
         else:
-            # Time-aware EMA for coordinates (tau = 0.02s, gives ~0.80 alpha at 30fps)
-            alpha = 1.0 - math.exp(-dt / 0.02)
+            # Time-aware EMA for coordinates (tau = 0.08s, gives ~0.33 alpha at 30fps)
+            alpha = 1.0 - math.exp(-dt / 0.08)
             alpha = min(max(alpha, 0.0), 1.0)
             
             x1 = alpha * result.bbox.x1 + (1.0 - alpha) * self.ema_bbox.x1

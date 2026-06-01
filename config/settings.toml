@@ -44,7 +44,7 @@ yolo_max_aspect_ratio_change = 8.0
 yolo_min_iou_on_id_change = 0.0
 yolo_model = "yoloe-26m-seg.pt"
 tracker = "bytetrack.yaml"
-confidence_threshold = 0.15
+confidence_threshold = 0.35
 wedetect_confidence_threshold = 0.10
 
 [camera]
@@ -54,7 +54,7 @@ horizontal_fov_deg = 62.0
 vertical_fov_deg = 48.0
 
 [control]
-deadband_deg = 0.8
+deadband_deg = 1.5
 max_speed_deg_s = 25.0
 max_accel_deg_s2 = 80.0
 derivative_filter_gamma = 0.65
