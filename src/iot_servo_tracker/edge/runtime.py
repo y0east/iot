@@ -27,12 +27,27 @@ from iot_servo_tracker.control.servo import ServoDriver, SimulatedServoDriver
 from iot_servo_tracker.control.state_machine import StateMachine
 from iot_servo_tracker.control.states import Event, SystemState
 from iot_servo_tracker.edge.ring_buffer import DetectionHistory, RingBuffer
+from iot_servo_tracker.edge.status_light import (
+    BLUE,
+    RED,
+    NullStatusLight,
+    RgbColor,
+    StatusLight,
+)
+
+
+SUSPICIOUS_TRACKING_CATEGORIES = {
+    ValidationCategory.SIMILAR_TARGET,
+    ValidationCategory.BBOX_ABSORPTION,
+    ValidationCategory.OCCLUSION,
+}
 
 
 @dataclass
 class EdgeRuntime:
     config: AppConfig
     servo: ServoDriver = field(default_factory=SimulatedServoDriver)
+    status_light: StatusLight = field(default_factory=NullStatusLight)
     state_machine: StateMachine = field(default_factory=StateMachine)
     controller: PDServoController = field(init=False)
     validator: SensorValidator = field(init=False)
@@ -58,6 +73,9 @@ class EdgeRuntime:
     processed_cmd_id_order: deque[str] = field(default_factory=deque)
     last_status: StatusAck = field(default_factory=StatusAck)
     last_command: ServoCommand | None = None
+    status_light_error: str = ""
+    status_light_override: RgbColor | None = None
+    status_light_override_reason: str = ""
     is_predicting: bool = False
     predicted_bbox: BBox | None = None
     locked_target_pan: float | None = None
@@ -70,6 +88,7 @@ class EdgeRuntime:
         self.delay_stats = DelayStats(
             default_threshold_ms=self.config.safety.default_ping_threshold_ms
         )
+        self._sync_status_light()
 
     @property
     def state(self) -> SystemState:
@@ -99,12 +118,14 @@ class EdgeRuntime:
             self._begin_scan(command.scan_range_deg)
             self.state_machine.apply(Event.TRACK_COMMAND)
         elif command.cmd_type == CommandType.STOP:
+            self._clear_status_light_override()
             self.current_cmd_id = command.cmd_id
             self.current_query = ""
             self.controller.set_max_speed_limit(None)
             self.state_machine.apply(Event.STOP_COMMAND)
             self._safe_stop_step_unlocked()
         elif command.cmd_type == CommandType.CENTER:
+            self._clear_status_light_override()
             self.current_cmd_id = command.cmd_id
             self.current_query = ""
             self.controller.set_max_speed_limit(None)
@@ -177,6 +198,7 @@ class EdgeRuntime:
         self.is_predicting = False
         self.predicted_bbox = None
         sensor_sample = sensor_sample or SensorSample.empty()
+        self._clear_infrared_light_override_if_inactive(sensor_sample)
         received_ts_us = received_ts_us or now_us()
         rtt_ms = max((received_ts_us - result.ts_req) / 1_000.0, 0.0)
         if self.current_query and result.query != self.current_query:
@@ -224,15 +246,38 @@ class EdgeRuntime:
         validation = self.validator.evaluate(corrected_bbox, sensor_sample)
 
         if validation.category == ValidationCategory.LIMIT_SWITCH:
+            self._set_status_light_override(RED, "limit_switch")
             self.safe_stop_step(dt_s)
             self.state_machine.apply(Event.CALIBRATION_ERROR)
-            return self._status(validation.reason, rtt_ms=rtt_ms, confidence=result.confidence, ack=False)
+            return self._status(
+                validation.reason,
+                rtt_ms=rtt_ms,
+                confidence=result.confidence,
+                ack=False,
+            )
+        if validation.category == ValidationCategory.INFRARED_TRIGGERED:
+            self._set_status_light_override(BLUE, "infrared_obstacle")
+            self._enter_safe_hold()
+            self.state_machine.apply(Event.SENSOR_ANOMALY)
+            self._safe_stop_step_unlocked(dt_s)
+            return self._status(
+                validation.reason,
+                rtt_ms=rtt_ms,
+                confidence=result.confidence,
+                ack=False,
+            )
+        if validation.category == ValidationCategory.MISSING:
+            self._set_status_light_override(RED, "tracking_lost")
+        elif validation.category in SUSPICIOUS_TRACKING_CATEGORIES:
+            self._set_status_light_override(RED, "tracking_rejected")
+        elif validation.category == ValidationCategory.OK and corrected_bbox is not None:
+            self._clear_status_light_override()
 
         if self.state == SystemState.TRACKING:
             if validation.safe_hold:
                 self._enter_safe_hold()
                 self.state_machine.apply(Event.SENSOR_ANOMALY)
-            elif validation.category not in {ValidationCategory.OK, ValidationCategory.MISSING}:
+            elif validation.category in SUSPICIOUS_TRACKING_CATEGORIES:
                 command = self.controller.soft_stop(dt_s)
                 self.servo.apply(command)
                 self.last_command = command
@@ -318,10 +363,18 @@ class EdgeRuntime:
         sensor_sample: SensorSample | None = None,
     ) -> StatusAck:
         sensor_sample = sensor_sample or SensorSample.empty()
+        self._clear_infrared_light_override_if_inactive(sensor_sample)
         if sensor_sample.limit_switch_active:
+            self._set_status_light_override(RED, "limit_switch")
             self._safe_stop_step_unlocked(dt_s)
             self.state_machine.apply(Event.CALIBRATION_ERROR)
             return self._status("limit switch is active", ack=False)
+        if sensor_sample.infrared_active:
+            self._set_status_light_override(BLUE, "infrared_obstacle")
+            self._enter_safe_hold()
+            self.state_machine.apply(Event.SENSOR_ANOMALY)
+            self._safe_stop_step_unlocked(dt_s)
+            return self._status("infrared obstacle sensor is active", ack=False)
         if self.state == SystemState.SCAN:
             self._scan_step(dt_s)
         elif self.state == SystemState.SAFE_HOLD:
@@ -343,6 +396,7 @@ class EdgeRuntime:
         if self.controller.is_centered():
             self.state_machine.apply(Event.CENTERED)
             self.current_query = ""
+            self._clear_status_light_override()
         return self._status("centering")
 
     def safe_stop_step(self, dt_s: float = 0.033) -> StatusAck:
@@ -378,6 +432,7 @@ class EdgeRuntime:
         self.predicted_bbox = None
         self.locked_target_pan = None
         self.locked_target_tilt = None
+        self._clear_status_light_override()
 
     def _begin_scan(self, scan_range_deg: float) -> None:
         limit = min(abs(scan_range_deg), self.config.scan.range_deg)
@@ -405,6 +460,7 @@ class EdgeRuntime:
             self.scan_target_deg = self.scan_left_deg
             self.scan_passes_completed += 1
         if self.scan_passes_completed >= self.config.scan.passes:
+            self._set_status_light_override(RED, "tracking_lost")
             self.state_machine.apply(Event.SCAN_FAILED)
 
     def _scan_candidate_locked(self, result: TrackingResult) -> bool:
@@ -544,7 +600,32 @@ class EdgeRuntime:
             message=message,
         )
         self.last_status = status
+        self._sync_status_light()
         return status
+
+    def _sync_status_light(self) -> None:
+        try:
+            self.status_light.set_state(self.state)
+            if self.status_light_override is not None:
+                self.status_light.set_color(self.status_light_override)
+            self.status_light_error = ""
+        except Exception as exc:
+            self.status_light_error = str(exc)
+
+    def _set_status_light_override(self, color: RgbColor, reason: str) -> None:
+        self.status_light_override = color
+        self.status_light_override_reason = reason
+
+    def _clear_status_light_override(self) -> None:
+        self.status_light_override = None
+        self.status_light_override_reason = ""
+
+    def _clear_infrared_light_override_if_inactive(self, sensor_sample: SensorSample) -> None:
+        if (
+            self.status_light_override_reason == "infrared_obstacle"
+            and not sensor_sample.infrared_active
+        ):
+            self._clear_status_light_override()
 
 
 def _bbox_grid_key(result: TrackingResult) -> str:

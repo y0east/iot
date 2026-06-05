@@ -94,7 +94,9 @@ Remaining integration work:
 Status: implemented.
 
 - ToF consistency is used for similar-target detection.
+- Ultrasonic stability is used to reject sudden camera bbox jumps before servo control.
 - Ultrasonic drop is used for occlusion detection.
+- Infrared obstacle input immediately enters the safe-hold path and shows the Blue LED override.
 - Limit switch input forces an error/safe stop path.
 - Missing vision results count toward safe hold.
 
@@ -109,6 +111,8 @@ Status: implemented.
 - PD control maps pixel error into pan/tilt servo command.
 - Deadband, max speed, max acceleration, PWM mapping, axis limits, soft-stop, center return, and simulated servo driver exist.
 - `SAFE_HOLD` uses powered soft-stop rather than immediate shutdown.
+- Optional RGB status LED maps runtime states to visible colors, with Red for
+  missing/rejected tracking and Blue for infrared obstacle detection.
 
 Remaining integration work:
 

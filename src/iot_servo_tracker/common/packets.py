@@ -155,6 +155,7 @@ class SensorSample:
     ts: int
     tof_mm: float | None = None
     ultrasonic_mm: float | None = None
+    infrared_active: bool = False
     limit_switch_active: bool = False
 
     @classmethod
