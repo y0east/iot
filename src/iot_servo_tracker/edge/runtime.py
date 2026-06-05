@@ -270,7 +270,11 @@ class EdgeRuntime:
             self._set_status_light_override(RED, "tracking_lost")
         elif validation.category in SUSPICIOUS_TRACKING_CATEGORIES:
             self._set_status_light_override(RED, "tracking_rejected")
-        elif validation.category == ValidationCategory.OK and corrected_bbox is not None:
+        elif (
+            corrected_bbox is not None
+            and not validation.safe_hold
+            and validation.category not in SUSPICIOUS_TRACKING_CATEGORIES
+        ):
             self._clear_status_light_override()
 
         if self.state == SystemState.TRACKING:

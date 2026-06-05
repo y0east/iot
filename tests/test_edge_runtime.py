@@ -330,6 +330,36 @@ class EdgeRuntimeTests(unittest.TestCase):
         self.assertEqual(status.message, "vision result is missing")
         self.assertEqual(light.last_color, RED)
 
+    def test_camera_tracking_restores_status_light_green_after_loss(self) -> None:
+        light = SimulatedStatusLight()
+        config = AppConfig(safety=SafetyConfig(consecutive_frames=3))
+        runtime = EdgeRuntime(config, status_light=light)
+        runtime.state_machine.state = SystemState.TRACKING
+        runtime.current_query = "red cup"
+
+        runtime.handle_tracking_result(
+            TrackingResult.empty(now_us(), query="red cup"),
+            sensor_sample(),
+        )
+        self.assertEqual(light.last_color, RED)
+
+        status = runtime.handle_tracking_result(
+            TrackingResult(
+                packet="tracking_result",
+                ts_req=now_us(),
+                ts_resp=now_us(),
+                bbox=BBox(300, 220, 340, 260),
+                confidence=0.9,
+                track_id=7,
+                query="red cup",
+            ),
+            SensorSample.empty(),
+        )
+
+        self.assertEqual(status.message, "no distance sensor sample is available")
+        self.assertEqual(runtime.state, SystemState.TRACKING)
+        self.assertEqual(light.last_color, GREEN)
+
     def test_ultrasonic_stable_jump_is_not_used_for_servo_control(self) -> None:
         light = SimulatedStatusLight()
         config = AppConfig(
