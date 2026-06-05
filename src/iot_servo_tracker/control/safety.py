@@ -18,6 +18,7 @@ class ValidationCategory(str, Enum):
     SIMILAR_TARGET = "SIMILAR_TARGET"
     BBOX_ABSORPTION = "BBOX_ABSORPTION"
     OCCLUSION = "OCCLUSION"
+    INFRARED_TRIGGERED = "INFRARED_TRIGGERED"
     SENSOR_UNAVAILABLE = "SENSOR_UNAVAILABLE"
     LIMIT_SWITCH = "LIMIT_SWITCH"
 
@@ -47,6 +48,10 @@ class SensorValidator:
         if sample.limit_switch_active:
             category = ValidationCategory.LIMIT_SWITCH
             reason = "limit switch is active"
+            required_hits = 1
+        elif sample.infrared_active:
+            category = ValidationCategory.INFRARED_TRIGGERED
+            reason = "infrared obstacle sensor is active"
             required_hits = 1
         elif bbox is None:
             if sensors_unavailable:
@@ -85,6 +90,7 @@ class SensorValidator:
             ValidationCategory.SIMILAR_TARGET,
             ValidationCategory.BBOX_ABSORPTION,
             ValidationCategory.OCCLUSION,
+            ValidationCategory.INFRARED_TRIGGERED,
             ValidationCategory.SENSOR_UNAVAILABLE,
             ValidationCategory.LIMIT_SWITCH,
         }:

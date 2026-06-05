@@ -12,9 +12,10 @@ The project follows the plan from the design PDF:
 2. Edge layer on Raspberry Pi 4
    - Captures frames into a timestamped ring buffer.
    - Receives vision results from the RTX server.
-   - Validates results with ToF and ultrasonic distance samples.
+   - Validates results with ToF, ultrasonic, and infrared sensor samples.
    - Runs the state machine and PD servo controller.
    - Emits status packets for the web screen.
+   - Drives the optional RGB status LED from the current runtime state.
    - Performs active scan, K-frame initial lock, safe-hold, limited rescan, and center return.
    - Ignores replayed command ids and stale inference packets before they can reach servo control.
 
@@ -98,6 +99,10 @@ The control loop converts image-space target error into servo commands:
 
 `SAFE_HOLD` is a powered soft-stop, not a full shutdown. New vision coordinates are not used as control input. The controller sets target angular velocity to zero and lets the acceleration limiter bring the mount to a stable stop. Sensor sampling and redetection may continue so the system can recover when the same target is confirmed again.
 Redetection requests are carried on the next ZMQ frame header so the server can reset the WeDetect/YOLO lock before returning a new candidate.
+
+Infrared obstacle input is treated as an immediate sensor anomaly. When it is
+active, the edge runtime soft-stops and enters `SAFE_HOLD` even if a fresh vision
+result has not arrived in the same loop.
 
 YOLO target loss is treated as a first-class recovery path. While the server has a
 WeDetect lock, normal frames are processed by YOLO + tracker. If YOLO returns no
@@ -187,7 +192,7 @@ iot-edge --config config/settings.toml --run
 Run it with real PCA9685 and distance sensors:
 
 ```bash
-iot-edge --config config/settings.toml --run --hardware-servo --hardware-sensors
+iot-edge --config config/settings.toml --run --hardware-servo --hardware-sensors --hardware-status-light
 ```
 
 Run the web command surface:

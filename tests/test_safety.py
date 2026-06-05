@@ -47,6 +47,18 @@ class SafetyTests(unittest.TestCase):
         closer = validator.evaluate(BBox(0, 0, 10, 10), SensorSample(ts=3, ultrasonic_mm=100))
         self.assertTrue(closer.safe_hold)
 
+    def test_infrared_active_enters_safe_hold_immediately(self) -> None:
+        config = SafetyConfig(consecutive_frames=45)
+        validator = SensorValidator(config)
+
+        result = validator.evaluate(
+            BBox(0, 0, 10, 10),
+            SensorSample(ts=1, tof_mm=500, ultrasonic_mm=520, infrared_active=True),
+        )
+
+        self.assertEqual(result.category, ValidationCategory.INFRARED_TRIGGERED)
+        self.assertTrue(result.safe_hold)
+
     def test_sensor_unavailable_counts_as_safe_hold_hit(self) -> None:
         config = SafetyConfig(consecutive_frames=2)
         validator = SensorValidator(config)

@@ -124,6 +124,24 @@ yolo_min_iou_on_id_change = 0.0
 
 `wedetect_ref_module` callable은 `frame_bytes`, `query`, `ts_req`, `wedetect_ref_model_dir`, `wedetect_uni_checkpoint`, `device` 키워드 인자를 받고, `{"bbox": [x1, y1, x2, y2], "confidence": 0.9, "track_id": 1}` 형태의 dict 또는 `TrackingResult`를 반환하면 됩니다. `wedetect_ref_model_dir`와 `wedetect_uni_checkpoint`를 비워두면 `huggingface-hub`가 설정된 repo에서 자동으로 다운로드합니다. 독립 스크립트를 쓰는 경우 `wedetect_ref_script`에 경로를 넣으면 임시 이미지 파일, WeDetect-Ref 경로, WeDetect-Uni 체크포인트, query가 인자로 전달됩니다.
 
+하드웨어 핀 설정 예시:
+
+```toml
+[hardware]
+ultrasonic_trig_pin = 22
+ultrasonic_echo_pin = 27
+ultrasonic_echo_timeout_s = 0.03
+infrared_pin = 17
+infrared_active_low = true
+limit_pin = 25
+rgb_red_pin = 5
+rgb_green_pin = 6
+rgb_blue_pin = 23
+rgb_active_low = false
+```
+
+요청한 GPIO `17/22/27`은 적외선 입력과 초음파 TRIG/ECHO에 배정했고, 실제 RGB 배선은 `R=5`, `G=6`, `B=23`으로 설정했습니다. 배선이 다르면 `[hardware]`에서 바꿀 수 있습니다.
+
 RTX 서버:
 
 ```bash
@@ -139,7 +157,7 @@ iot-edge --config config/settings.toml --run
 PCA9685 서보와 실제 거리센서를 사용할 때:
 
 ```bash
-iot-edge --config config/settings.toml --run --hardware-servo --hardware-sensors
+iot-edge --config config/settings.toml --run --hardware-servo --hardware-sensors --hardware-status-light
 ```
 
 하드웨어 없이 통신 루프만 확인할 때:
@@ -152,7 +170,7 @@ iot-edge --config config/settings.toml --run --simulated-camera
 
 1. `config/settings.example.toml`을 `config/settings.toml`로 복사하고 MQTT/ZMQ 주소와 서보 한계를 환경에 맞춥니다.
 2. `wedetect_ref_module` 또는 `wedetect_ref_script`, Hugging Face repo 설정, `yolo_model`, `tracker`를 RTX 서버 환경에 맞춥니다.
-3. 라즈베리파이에서는 `iot-edge --run --hardware-servo --hardware-sensors`로 PCA9685 서보와 ToF/초음파/리밋스위치를 사용합니다.
-4. 하드웨어 핀 번호가 다르면 `RaspberryPiSensorReader` 생성 인자를 장비 배선에 맞춥니다.
+3. 라즈베리파이에서는 `iot-edge --run --hardware-servo --hardware-sensors --hardware-status-light`로 PCA9685 서보, ToF/초음파/적외선/리밋스위치, RGB 상태 LED를 사용합니다.
+4. 하드웨어 핀 번호가 다르면 `[hardware]` 섹션을 장비 배선에 맞춥니다.
 5. Kp/Kd, `omega_max`, `alpha_max`, `Tpix`, `Ttof`, `Tultra`, `Nh`를 실제 카메라/서보/전원 환경에서 보수적으로 튜닝합니다.
 6. 유사 물체 오검출이 잦으면 `yolo_max_center_jump_px`와 `yolo_min_iou_on_id_change`를 낮추고, 큰 배경 bbox로 흡수되면 `yolo_max_area_growth_ratio`와 `yolo_max_frame_area_ratio`를 낮춥니다.

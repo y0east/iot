@@ -2,10 +2,17 @@ import time
 import unittest
 
 from iot_servo_tracker.common.config import AppConfig, SafetyConfig, ScanConfig
-from iot_servo_tracker.common.packets import BBox, CommandPacket, CommandType, SensorSample, TrackingResult
+from iot_servo_tracker.common.packets import (
+    BBox,
+    CommandPacket,
+    CommandType,
+    SensorSample,
+    TrackingResult,
+)
 from iot_servo_tracker.common.timebase import now_us
 from iot_servo_tracker.control.states import Event, SystemState
 from iot_servo_tracker.edge.runtime import EdgeRuntime
+from iot_servo_tracker.edge.status_light import GREEN, RED, SimulatedStatusLight
 
 
 def sensor_sample() -> SensorSample:
@@ -207,6 +214,22 @@ class EdgeRuntimeTests(unittest.TestCase):
             )
 
         self.assertEqual(runtime.state, SystemState.SAFE_HOLD)
+
+    def test_status_light_follows_runtime_state(self) -> None:
+        light = SimulatedStatusLight()
+        runtime = EdgeRuntime(AppConfig(), status_light=light)
+        runtime.state_machine.state = SystemState.TRACKING
+        runtime.control_step(sensor_sample=sensor_sample())
+        self.assertEqual(light.last_state, SystemState.TRACKING)
+        self.assertEqual(light.last_color, GREEN)
+
+        runtime.control_step(
+            sensor_sample=SensorSample(ts=now_us(), infrared_active=True),
+        )
+
+        self.assertEqual(runtime.state, SystemState.SAFE_HOLD)
+        self.assertEqual(light.last_state, SystemState.SAFE_HOLD)
+        self.assertEqual(light.last_color, RED)
 
     def test_redetect_command_sets_one_shot_request(self) -> None:
         runtime = EdgeRuntime(AppConfig())

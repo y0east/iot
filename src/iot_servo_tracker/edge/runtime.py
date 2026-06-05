@@ -27,12 +27,14 @@ from iot_servo_tracker.control.servo import ServoDriver, SimulatedServoDriver
 from iot_servo_tracker.control.state_machine import StateMachine
 from iot_servo_tracker.control.states import Event, SystemState
 from iot_servo_tracker.edge.ring_buffer import DetectionHistory, RingBuffer
+from iot_servo_tracker.edge.status_light import NullStatusLight, StatusLight
 
 
 @dataclass
 class EdgeRuntime:
     config: AppConfig
     servo: ServoDriver = field(default_factory=SimulatedServoDriver)
+    status_light: StatusLight = field(default_factory=NullStatusLight)
     state_machine: StateMachine = field(default_factory=StateMachine)
     controller: PDServoController = field(init=False)
     validator: SensorValidator = field(init=False)
@@ -58,6 +60,7 @@ class EdgeRuntime:
     processed_cmd_id_order: deque[str] = field(default_factory=deque)
     last_status: StatusAck = field(default_factory=StatusAck)
     last_command: ServoCommand | None = None
+    status_light_error: str = ""
     is_predicting: bool = False
     predicted_bbox: BBox | None = None
     locked_target_pan: float | None = None
@@ -73,6 +76,7 @@ class EdgeRuntime:
         self.delay_stats = DelayStats(
             default_threshold_ms=self.config.safety.default_ping_threshold_ms
         )
+        self._sync_status_light()
 
     @property
     def state(self) -> SystemState:
@@ -219,7 +223,22 @@ class EdgeRuntime:
         if validation.category == ValidationCategory.LIMIT_SWITCH:
             self.safe_stop_step(dt_s)
             self.state_machine.apply(Event.CALIBRATION_ERROR)
-            return self._status(validation.reason, rtt_ms=rtt_ms, confidence=result.confidence, ack=False)
+            return self._status(
+                validation.reason,
+                rtt_ms=rtt_ms,
+                confidence=result.confidence,
+                ack=False,
+            )
+        if validation.category == ValidationCategory.INFRARED_TRIGGERED:
+            self._enter_safe_hold()
+            self.state_machine.apply(Event.SENSOR_ANOMALY)
+            self._safe_stop_step_unlocked(dt_s)
+            return self._status(
+                validation.reason,
+                rtt_ms=rtt_ms,
+                confidence=result.confidence,
+                ack=False,
+            )
 
         if self.state == SystemState.TRACKING:
             if validation.safe_hold:
@@ -333,6 +352,11 @@ class EdgeRuntime:
             self._safe_stop_step_unlocked(dt_s)
             self.state_machine.apply(Event.CALIBRATION_ERROR)
             return self._status("limit switch is active", ack=False)
+        if sensor_sample.infrared_active:
+            self._enter_safe_hold()
+            self.state_machine.apply(Event.SENSOR_ANOMALY)
+            self._safe_stop_step_unlocked(dt_s)
+            return self._status("infrared obstacle sensor is active", ack=False)
         if self.state == SystemState.SCAN:
             self._scan_step(dt_s)
         elif self.state == SystemState.SAFE_HOLD:
@@ -553,7 +577,15 @@ class EdgeRuntime:
             message=message,
         )
         self.last_status = status
+        self._sync_status_light()
         return status
+
+    def _sync_status_light(self) -> None:
+        try:
+            self.status_light.set_state(self.state)
+            self.status_light_error = ""
+        except Exception as exc:
+            self.status_light_error = str(exc)
 
 
 def _bbox_grid_key(result: TrackingResult) -> str:

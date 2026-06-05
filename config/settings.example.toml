@@ -21,6 +21,22 @@ result_rcv_hwm = 1
 [web]
 processed_stream_url = ""
 
+[hardware]
+# BCM GPIO numbering. The sensor defaults use the requested GPIO set:
+# IR input = 17, ultrasonic TRIG = 22, ultrasonic ECHO = 27.
+ultrasonic_trig_pin = 22
+ultrasonic_echo_pin = 27
+ultrasonic_echo_timeout_s = 0.03
+infrared_pin = 17
+infrared_active_low = true
+limit_pin = 25
+# RGB status LED pins are separate because the three requested pins are already
+# occupied by the ultrasonic and infrared sensors.
+rgb_red_pin = 5
+rgb_green_pin = 6
+rgb_blue_pin = 23
+rgb_active_low = false
+
 [server]
 # WeDetect-Ref is downloaded from Hugging Face and executed locally.
 wedetect_ref_repo_id = "fushh7/WeDetect-Ref-2B"

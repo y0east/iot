@@ -35,6 +35,11 @@ class StateMachine:
             return SystemState.ERROR, "calibration or limit switch error"
         if event == Event.TRACK_COMMAND and state != SystemState.ERROR:
             return SystemState.SCAN, "tracking command accepted"
+        if event == Event.SENSOR_ANOMALY and state not in {
+            SystemState.IDLE,
+            SystemState.ERROR,
+        }:
+            return SystemState.SAFE_HOLD, "sensor validation rejected runtime state"
 
         table: dict[tuple[SystemState, Event], tuple[SystemState, str]] = {
             (SystemState.SCAN, Event.DETECTION_LOCKED): (
@@ -52,10 +57,6 @@ class StateMachine:
             (SystemState.TRACKING, Event.TRACK_OK): (
                 SystemState.TRACKING,
                 "tracking remains valid",
-            ),
-            (SystemState.TRACKING, Event.SENSOR_ANOMALY): (
-                SystemState.SAFE_HOLD,
-                "sensor validation rejected vision result",
             ),
             (SystemState.TRACKING, Event.COMMS_DELAY): (
                 SystemState.SAFE_HOLD,
