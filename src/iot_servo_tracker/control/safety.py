@@ -59,7 +59,6 @@ class SensorValidator:
                 reason = "vision result is missing (sensors unavailable but bypassed)"
             else:
                 category = ValidationCategory.MISSING
-                reason = "vision result is missing"
         elif sensors_unavailable and self.config.pixel_jump_threshold < 900.0:
             category = ValidationCategory.SENSOR_UNAVAILABLE
             reason = "no distance sensor sample is available"
