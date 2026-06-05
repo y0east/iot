@@ -21,6 +21,20 @@ result_rcv_hwm = 1
 [web]
 processed_stream_url = ""
 
+[hardware]
+# BCM GPIO numbering. Requested wiring:
+# IR input = 17, ultrasonic TRIG = 22, ultrasonic ECHO = 27.
+ultrasonic_trig_pin = 22
+ultrasonic_echo_pin = 27
+ultrasonic_echo_timeout_s = 0.03
+infrared_pin = 17
+infrared_active_low = true
+limit_pin = 25
+rgb_red_pin = 5
+rgb_green_pin = 6
+rgb_blue_pin = 23
+rgb_active_low = false
+
 [server]
 # WeDetect-Ref is downloaded from Hugging Face and executed locally.
 wedetect_ref_repo_id = "fushh7/WeDetect-Ref-2B"
@@ -83,6 +97,7 @@ pwm_max_us = 2000
 pixel_jump_threshold = 180.0
 tof_delta_threshold_mm = 40.0
 ultrasonic_jump_threshold_mm = 120.0
+ultrasonic_stable_delta_threshold_mm = 60.0
 bbox_area_growth_threshold = 16.0
 bbox_area_shrink_threshold = 0.10
 bbox_frame_area_threshold = 0.85

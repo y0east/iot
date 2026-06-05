@@ -46,6 +46,7 @@ class SafetyConfig:
     pixel_jump_threshold: float = 180.0
     tof_delta_threshold_mm: float = 40.0
     ultrasonic_jump_threshold_mm: float = 120.0
+    ultrasonic_stable_delta_threshold_mm: float = 60.0
     bbox_area_growth_threshold: float = 16.0
     bbox_area_shrink_threshold: float = 0.10
     bbox_frame_area_threshold: float = 0.85
@@ -97,6 +98,20 @@ class WebConfig:
 
 
 @dataclass(frozen=True)
+class HardwareConfig:
+    ultrasonic_trig_pin: int = 22
+    ultrasonic_echo_pin: int = 27
+    ultrasonic_echo_timeout_s: float = 0.03
+    infrared_pin: int = 17
+    infrared_active_low: bool = True
+    limit_pin: int = 25
+    rgb_red_pin: int = 5
+    rgb_green_pin: int = 6
+    rgb_blue_pin: int = 23
+    rgb_active_low: bool = False
+
+
+@dataclass(frozen=True)
 class ServerConfig:
     wedetect_ref_repo_id: str = "fushh7/WeDetect-Ref-2B"
     wedetect_uni_repo_id: str = "fushh7/WeDetect"
@@ -129,6 +144,7 @@ class AppConfig:
     mqtt: MqttConfig = field(default_factory=MqttConfig)
     zmq: ZmqConfig = field(default_factory=ZmqConfig)
     web: WebConfig = field(default_factory=WebConfig)
+    hardware: HardwareConfig = field(default_factory=HardwareConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
 
 
@@ -202,6 +218,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         mqtt=MqttConfig(**raw.get("mqtt", {})),
         zmq=zmq,
         web=WebConfig(**raw.get("web", {})),
+        hardware=HardwareConfig(**raw.get("hardware", {})),
         server=ServerConfig(**raw.get("server", {})),
     )
 
