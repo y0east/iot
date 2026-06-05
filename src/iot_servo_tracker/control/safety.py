@@ -18,6 +18,7 @@ class ValidationCategory(str, Enum):
     SIMILAR_TARGET = "SIMILAR_TARGET"
     BBOX_ABSORPTION = "BBOX_ABSORPTION"
     OCCLUSION = "OCCLUSION"
+    INFRARED_TRIGGERED = "INFRARED_TRIGGERED"
     SENSOR_UNAVAILABLE = "SENSOR_UNAVAILABLE"
     LIMIT_SWITCH = "LIMIT_SWITCH"
 
@@ -48,6 +49,10 @@ class SensorValidator:
             category = ValidationCategory.LIMIT_SWITCH
             reason = "limit switch is active"
             required_hits = 1
+        elif sample.infrared_active:
+            category = ValidationCategory.INFRARED_TRIGGERED
+            reason = "infrared obstacle sensor is active"
+            required_hits = 1
         elif bbox is None:
             if sensors_unavailable:
                 category = ValidationCategory.MISSING
@@ -61,19 +66,34 @@ class SensorValidator:
         elif self.prev_bbox is not None and self.prev_sample is not None:
             pixel_jump = _pixel_jump(bbox, self.prev_bbox)
             tof_delta = _delta(sample.tof_mm, self.prev_sample.tof_mm)
+            ultrasonic_delta = _delta(
+                sample.ultrasonic_mm,
+                self.prev_sample.ultrasonic_mm,
+            )
             ultrasonic_drop = _drop(sample.ultrasonic_mm, self.prev_sample.ultrasonic_mm)
             bbox_absorption_reason = self._bbox_absorption_reason(bbox, self.prev_bbox)
+            stable_tof = (
+                tof_delta is not None and tof_delta < self.config.tof_delta_threshold_mm
+            )
+            stable_ultrasonic = (
+                ultrasonic_delta is not None
+                and ultrasonic_delta < self.config.ultrasonic_stable_delta_threshold_mm
+            )
 
             if bbox_absorption_reason is not None:
                 category = ValidationCategory.BBOX_ABSORPTION
                 reason = bbox_absorption_reason
             elif (
                 pixel_jump > self.config.pixel_jump_threshold
-                and tof_delta is not None
-                and tof_delta < self.config.tof_delta_threshold_mm
+                and (stable_tof or stable_ultrasonic)
             ):
                 category = ValidationCategory.SIMILAR_TARGET
-                reason = "vision center jumped but ToF distance barely changed"
+                if stable_tof and stable_ultrasonic:
+                    reason = "vision center jumped but distance sensors barely changed"
+                elif stable_ultrasonic:
+                    reason = "vision center jumped but ultrasonic distance stayed stable"
+                else:
+                    reason = "vision center jumped but ToF distance barely changed"
             elif (
                 ultrasonic_drop is not None
                 and ultrasonic_drop > self.config.ultrasonic_jump_threshold_mm
@@ -85,6 +105,7 @@ class SensorValidator:
             ValidationCategory.SIMILAR_TARGET,
             ValidationCategory.BBOX_ABSORPTION,
             ValidationCategory.OCCLUSION,
+            ValidationCategory.INFRARED_TRIGGERED,
             ValidationCategory.SENSOR_UNAVAILABLE,
             ValidationCategory.LIMIT_SWITCH,
         }:

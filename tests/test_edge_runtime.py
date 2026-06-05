@@ -6,6 +6,7 @@ from iot_servo_tracker.common.packets import BBox, CommandPacket, CommandType, S
 from iot_servo_tracker.common.timebase import now_us
 from iot_servo_tracker.control.states import Event, SystemState
 from iot_servo_tracker.edge.runtime import EdgeRuntime
+from iot_servo_tracker.edge.status_light import BLUE, GREEN, RED, SimulatedStatusLight
 
 
 def sensor_sample() -> SensorSample:
@@ -294,6 +295,92 @@ class EdgeRuntimeTests(unittest.TestCase):
             )
 
         self.assertEqual(runtime.state, SystemState.SAFE_HOLD)
+
+    def test_status_light_follows_runtime_state_and_infrared_override(self) -> None:
+        light = SimulatedStatusLight()
+        runtime = EdgeRuntime(AppConfig(), status_light=light)
+        runtime.state_machine.state = SystemState.TRACKING
+        runtime.control_step(sensor_sample=sensor_sample())
+        self.assertEqual(light.last_state, SystemState.TRACKING)
+        self.assertEqual(light.last_color, GREEN)
+
+        runtime.control_step(
+            sensor_sample=SensorSample(ts=now_us(), infrared_active=True),
+        )
+
+        self.assertEqual(runtime.state, SystemState.SAFE_HOLD)
+        self.assertEqual(light.last_state, SystemState.SAFE_HOLD)
+        self.assertEqual(light.last_color, BLUE)
+
+        runtime.control_step(sensor_sample=sensor_sample())
+
+        self.assertEqual(light.last_color, RED)
+
+    def test_tracking_loss_sets_status_light_red(self) -> None:
+        light = SimulatedStatusLight()
+        runtime = EdgeRuntime(AppConfig(), status_light=light)
+        runtime.state_machine.state = SystemState.TRACKING
+        runtime.current_query = "red cup"
+
+        status = runtime.handle_tracking_result(
+            TrackingResult.empty(now_us(), query="red cup"),
+            sensor_sample(),
+        )
+
+        self.assertEqual(status.message, "vision result is missing")
+        self.assertEqual(light.last_color, RED)
+
+    def test_ultrasonic_stable_jump_is_not_used_for_servo_control(self) -> None:
+        light = SimulatedStatusLight()
+        config = AppConfig(
+            safety=SafetyConfig(
+                consecutive_frames=2,
+                pixel_jump_threshold=40.0,
+                ultrasonic_stable_delta_threshold_mm=20.0,
+            )
+        )
+        runtime = EdgeRuntime(config, status_light=light)
+        runtime.state_machine.state = SystemState.TRACKING
+        runtime.current_query = "red cup"
+        base_ts = now_us()
+        jump_ts = base_ts + 300_000
+        baseline = TrackingResult(
+            packet="tracking_result",
+            ts_req=base_ts,
+            ts_resp=base_ts,
+            bbox=BBox(300, 220, 340, 260),
+            confidence=0.9,
+            track_id=7,
+            query="red cup",
+        )
+        runtime.handle_tracking_result(
+            baseline,
+            SensorSample(ts=now_us(), ultrasonic_mm=650.0),
+            received_ts_us=base_ts + 10_000,
+        )
+        previous_valid = runtime.last_valid_result
+
+        status = runtime.handle_tracking_result(
+            TrackingResult(
+                packet="tracking_result",
+                ts_req=jump_ts,
+                ts_resp=jump_ts,
+                bbox=BBox(20, 220, 60, 260),
+                confidence=0.9,
+                track_id=7,
+                query="red cup",
+            ),
+            SensorSample(ts=now_us(), ultrasonic_mm=655.0),
+            received_ts_us=jump_ts + 10_000,
+        )
+
+        self.assertEqual(
+            status.message,
+            "vision center jumped but ultrasonic distance stayed stable",
+        )
+        self.assertEqual(runtime.state, SystemState.TRACKING)
+        self.assertEqual(runtime.last_valid_result, previous_valid)
+        self.assertEqual(light.last_color, RED)
 
     def test_redetect_command_sets_one_shot_request(self) -> None:
         runtime = EdgeRuntime(AppConfig())
